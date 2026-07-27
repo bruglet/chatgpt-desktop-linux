@@ -47,6 +47,15 @@ jobs:
         with:
           node-version: 24
 
+      - name: Verify and apply downstream AppImage single-instance fix
+        run: |
+          set -euo pipefail
+          node .github/scripts/apply-appimage-single-instance-fix.test.mjs
+          node .github/scripts/apply-appimage-single-instance-fix.mjs --check
+          node .github/scripts/apply-appimage-single-instance-fix.mjs --apply
+          node .github/scripts/apply-appimage-single-instance-fix.mjs --verify
+          bash -n launcher/start.sh.template
+
       - name: Install build dependencies
         run: |
           set -euo pipefail
@@ -180,6 +189,17 @@ jobs:
               "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
           )
           test -x "$extract_dir/squashfs-root/AppRun"
+
+          mapfile -t packaged_launchers < <(
+            find "$extract_dir/squashfs-root/opt" \
+              -mindepth 2 -maxdepth 2 -type f -name start.sh -print
+          )
+          if [ "${#packaged_launchers[@]}" -ne 1 ]; then
+            echo "Expected exactly one packaged launcher, found ${#packaged_launchers[@]}" >&2
+            exit 1
+          fi
+          node .github/scripts/apply-appimage-single-instance-fix.mjs \
+            --verify "${packaged_launchers[0]}"
 
           sha256sum "$appimage" > dist/SHA256SUMS
           artifact_name="$(basename "$appimage")"

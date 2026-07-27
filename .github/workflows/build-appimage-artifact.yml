@@ -1,0 +1,253 @@
+name: Build AppImage Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the validated AppImage as a GitHub Release
+        type: boolean
+        required: true
+        default: false
+      expected_dmg_http_key:
+        description: Expected stable HTTP identity from the upstream watcher
+        type: string
+        required: false
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-appimage-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-appimage:
+    name: Build x86-64 AppImage
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'automation/upstream-sync' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out selected fork revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl g++ make p7zip-full python3 tar unzip
+
+      - name: Verify Rust toolchain
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+
+      - name: Download appimagetool
+        id: appimagetool
+        run: |
+          set -euo pipefail
+          tool_path="$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 \
+            -o "$tool_path" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod 0755 "$tool_path"
+          test -s "$tool_path"
+          echo "path=$tool_path" >> "$GITHUB_OUTPUT"
+
+      - name: Download and fingerprint the current upstream DMG
+        id: dmg
+        env:
+          UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
+          EXPECTED_DMG_HTTP_KEY: ${{ inputs.expected_dmg_http_key }}
+        run: |
+          set -euo pipefail
+          headers_before="$(mktemp)"
+          headers_after="$(mktemp)"
+          trap 'rm -f "$headers_before" "$headers_after"' EXIT
+          capture_identity() {
+            local headers_file="$1"
+            curl --proto '=https' --tlsv1.2 -fsSLI --retry 3 "$UPSTREAM_DMG_URL" > "$headers_file"
+            local last_modified etag content_length
+            last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+            etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_file")"
+            content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+            if [ -z "$etag" ] && { [ -z "$last_modified" ] || [ -z "$content_length" ]; }; then
+              echo "The DMG response did not provide a stable HTTP identity." >&2
+              return 1
+            fi
+            printf '%s|%s|%s\n' "$last_modified" "$etag" "$content_length" | sha256sum | cut -d' ' -f1
+          }
+          http_key_before="$(capture_identity "$headers_before")"
+          if [ -n "$EXPECTED_DMG_HTTP_KEY" ] && [ "$http_key_before" != "$EXPECTED_DMG_HTTP_KEY" ]; then
+            echo "The upstream DMG changed after the accepted watcher observation." >&2
+            exit 1
+          fi
+          dmg_path="$RUNNER_TEMP/Codex.dmg"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 -o "$dmg_path" "$UPSTREAM_DMG_URL"
+          http_key_after="$(capture_identity "$headers_after")"
+          if [ "$http_key_before" != "$http_key_after" ]; then
+            echo "The upstream DMG HTTP identity changed during download." >&2
+            exit 1
+          fi
+          dmg_sha256="$(sha256sum "$dmg_path" | cut -d' ' -f1)"
+          dmg_size_bytes="$(stat -c '%s' "$dmg_path")"
+          tested_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_after")"
+          etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_after")"
+          content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_after")"
+          cat > upstream-dmg-metadata.json <<JSON
+          {
+            "url": "$UPSTREAM_DMG_URL",
+            "path": "$dmg_path",
+            "last_modified": "$last_modified",
+            "etag": "$etag",
+            "content_length": "$content_length",
+            "http_identity_key": "$http_key_after",
+            "sha256": "$dmg_sha256",
+            "size_bytes": "$dmg_size_bytes",
+            "tested_at_utc": "$tested_at_utc"
+          }
+          JSON
+          echo "path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "http_key=$http_key_after" >> "$GITHUB_OUTPUT"
+          echo "sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
+          echo "release_tag=chatgpt-dmg-$dmg_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Build and accept app from the fingerprinted DMG
+        env:
+          CODEX_ACCEPTANCE_DECISION_JSON: ${{ github.workspace }}/upstream-dmg-decision.json
+          CODEX_ACCEPTANCE_OVERRIDE: '0'
+          CODEX_ACCEPTANCE_SOURCE: github-actions-appimage-release
+          CODEX_UPSTREAM_DMG_METADATA_JSON: ${{ github.workspace }}/upstream-dmg-metadata.json
+          REBUILD_REPORT_DIR: ${{ github.workspace }}/upstream-acceptance
+        run: make build-app DMG="${{ steps.dmg.outputs.path }}"
+
+      - name: Enforce the shared upstream DMG acceptance decision
+        id: acceptance
+        run: |
+          set -euo pipefail
+          test -f upstream-dmg-decision.json
+          verdict="$(node -e 'console.log(require("./upstream-dmg-decision.json").verdict)')"
+          case "$verdict" in
+            accepted|accepted_with_warnings) ;;
+            *) echo "Upstream DMG verdict: $verdict" >&2; exit 1 ;;
+          esac
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          APPIMAGETOOL: ${{ steps.appimagetool.outputs.path }}
+        run: make appimage
+
+      - name: Validate AppImage and write build metadata
+        id: artifact
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          appimages=(dist/codex-desktop-*-x86_64.AppImage)
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            echo "Expected exactly one x86-64 AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          fi
+
+          appimage="${appimages[0]}"
+          test -s "$appimage"
+          test -x "$appimage"
+
+          extract_dir="$RUNNER_TEMP/appimage-validation"
+          mkdir -p "$extract_dir"
+          (
+            cd "$extract_dir"
+            env -u APPIMAGE_EXTRACT_AND_RUN \
+              "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          )
+          test -x "$extract_dir/squashfs-root/AppRun"
+
+          sha256sum "$appimage" > dist/SHA256SUMS
+          artifact_name="$(basename "$appimage")"
+          {
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "commit=$GITHUB_SHA"
+            echo "upstream=https://github.com/ilysenko/codex-desktop-linux"
+            echo "upstream_dmg_sha256=${{ steps.dmg.outputs.sha256 }}"
+            echo "acceptance_verdict=${{ steps.acceptance.outputs.verdict }}"
+            echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "built_at_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "artifact=$artifact_name"
+          } > dist/BUILD-INFO.txt
+
+          echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
+          {
+            echo "## AppImage artifact"
+            echo
+            echo "- File: \`$artifact_name\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- SHA-256: \`$(cut -d' ' -f1 dist/SHA256SUMS)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-desktop-linux-appimage
+          path: |
+            ${{ steps.artifact.outputs.appimage }}
+            dist/SHA256SUMS
+            dist/BUILD-INFO.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Publish immutable GitHub Release
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.dmg.outputs.release_tag }}
+          APPIMAGE_PATH: ${{ steps.artifact.outputs.appimage }}
+          DMG_SHA256: ${{ steps.dmg.outputs.sha256 }}
+          ACCEPTANCE_VERDICT: ${{ steps.acceptance.outputs.verdict }}
+          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          notes_file="$(mktemp)"
+          trap 'rm -f "$notes_file"' EXIT
+          cat > "$notes_file" <<EOF
+          Automated AppImage built from an upstream revision whose current OpenAI
+          DMG passed the repository acceptance profile.
+
+          - Fork commit: \`$GITHUB_SHA\`
+          - Upstream DMG SHA-256: \`$DMG_SHA256\`
+          - Acceptance verdict: \`$ACCEPTANCE_VERDICT\`
+
+          <!-- upstream-dmg-http-key:$DMG_HTTP_KEY -->
+          EOF
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$APPIMAGE_PATH" \
+            dist/SHA256SUMS \
+            dist/BUILD-INFO.txt \
+            upstream-dmg-metadata.json \
+            upstream-dmg-decision.json \
+            --title "$(basename "$APPIMAGE_PATH" .AppImage)" \
+            --notes-file "$notes_file"

@@ -1,0 +1,231 @@
+name: Sync Ready Upstream
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-ready-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: ilysenko/codex-desktop-linux
+  SYNC_BRANCH: automation/upstream-sync
+
+jobs:
+  sync-ready-upstream:
+    name: Open Upstream Sync Pull Request
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Require a sync token that can trigger pull request checks
+        env:
+          SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "Configure the UPSTREAM_SYNC_TOKEN repository secret with Contents and Pull requests write access." >&2
+            echo "A separate token is required because pushes made by GITHUB_TOKEN do not trigger pull request workflows." >&2
+            exit 1
+          fi
+
+      - name: Check out the fork default branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Capture the current upstream DMG HTTP identity
+        id: dmg
+        env:
+          UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
+        run: |
+          set -euo pipefail
+          headers_file="$(mktemp)"
+          trap 'rm -f "$headers_file"' EXIT
+          curl --proto '=https' --tlsv1.2 -fsSLI --retry 3 "$UPSTREAM_DMG_URL" > "$headers_file"
+          last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+          etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_file")"
+          content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+          if [ -z "$etag" ] && { [ -z "$last_modified" ] || [ -z "$content_length" ]; }; then
+            echo "The DMG response did not provide a stable HTTP identity." >&2
+            exit 1
+          fi
+          http_key="$(printf '%s|%s|%s\n' "$last_modified" "$etag" "$content_length" | sha256sum | cut -d' ' -f1)"
+          {
+            echo "last_modified=$last_modified"
+            echo "etag=$etag"
+            echo "content_length=$content_length"
+            echo "http_key=$http_key"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find the accepted upstream head
+        id: upstream
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          DMG_LAST_MODIFIED: ${{ steps.dmg.outputs.last_modified }}
+          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
+        with:
+          script: |
+            const [owner, repo] = process.env.UPSTREAM_REPOSITORY.split('/');
+            const { data: upstreamRepo } = await github.rest.repos.get({ owner, repo });
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: upstreamRepo.default_branch,
+            });
+            const headSha = branch.commit.sha;
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: 'upstream-build-app.yml',
+              branch: upstreamRepo.default_branch,
+              status: 'completed',
+              per_page: 50,
+            });
+            const dmgChangedAt = Date.parse(process.env.DMG_LAST_MODIFIED);
+            const acceptedRun = data.workflow_runs.find((run) => {
+              const runStartedAt = Date.parse(run.run_started_at || run.created_at);
+              return run.head_sha === headSha &&
+                run.conclusion === 'success' &&
+                ['push', 'schedule'].includes(run.event) &&
+                run.head_repository?.full_name === process.env.UPSTREAM_REPOSITORY &&
+                Number.isFinite(dmgChangedAt) && runStartedAt >= dmgChangedAt;
+            });
+            if (!acceptedRun) {
+              core.notice(`Upstream ${headSha} does not yet have a successful acceptance run.`);
+              core.setOutput('ready', 'false');
+              return;
+            }
+            core.setOutput('ready', 'true');
+            core.setOutput('sha', headSha);
+            core.setOutput('short_sha', headSha.slice(0, 12));
+            core.setOutput('run_url', acceptedRun.html_url);
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const marker = `<!-- upstream-dmg-http-key:${process.env.DMG_HTTP_KEY} -->`;
+            core.setOutput('released', releases.some((release) => release.body?.includes(marker)) ? 'true' : 'false');
+
+      - name: Fetch the accepted upstream revision
+        if: steps.upstream.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/$UPSTREAM_REPOSITORY.git"
+          git fetch --no-tags upstream "${{ steps.upstream.outputs.sha }}"
+
+      - name: Check whether the revision is already synchronized
+        if: steps.upstream.outputs.ready == 'true'
+        id: synchronized
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor "${{ steps.upstream.outputs.sha }}" HEAD; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the synchronization branch
+        if: steps.upstream.outputs.ready == 'true' && steps.synchronized.outputs.already != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "+refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" || true
+          git switch -C "$SYNC_BRANCH"
+          git merge --no-edit --no-ff "${{ steps.upstream.outputs.sha }}" \
+            -m "Merge accepted upstream ${{ steps.upstream.outputs.short_sha }}"
+          git push --force-with-lease origin "HEAD:refs/heads/$SYNC_BRANCH"
+
+      - name: Open the synchronization pull request
+        if: steps.upstream.outputs.ready == 'true' && steps.synchronized.outputs.already != 'true'
+        id: sync_pr
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        with:
+          github-token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = `${owner}:${process.env.SYNC_BRANCH}`;
+            const base = context.payload.repository.default_branch;
+            const { data: openPulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head,
+              base,
+              per_page: 1,
+            });
+            let pull = openPulls[0];
+            if (!pull) {
+              const body = [
+                `Synchronizes the fork with upstream commit \`${process.env.UPSTREAM_SHA}\` after the`,
+                'upstream DMG acceptance workflow succeeded.',
+                '',
+                `Acceptance run: ${process.env.ACCEPTANCE_RUN_URL}`,
+                '',
+                `<!-- automated-upstream-sync:${process.env.UPSTREAM_SHA} -->`,
+                `<!-- upstream-dmg-http-key:${process.env.DMG_HTTP_KEY} -->`,
+              ].join('\n');
+              ({ data: pull } = await github.rest.pulls.create({
+                owner,
+                repo,
+                base,
+                head: process.env.SYNC_BRANCH,
+                title: `Sync accepted upstream ${process.env.UPSTREAM_SHORT_SHA}`,
+                body,
+              }));
+            }
+            core.setOutput('url', pull.html_url);
+        env:
+          ACCEPTANCE_RUN_URL: ${{ steps.upstream.outputs.run_url }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+          UPSTREAM_SHORT_SHA: ${{ steps.upstream.outputs.short_sha }}
+          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
+
+      - name: Enable auto-merge
+        if: steps.upstream.outputs.ready == 'true' && steps.synchronized.outputs.already != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACCEPTANCE_RUN_URL: ${{ steps.upstream.outputs.run_url }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+          PR_URL: ${{ steps.sync_pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_URL" --auto --merge
+          {
+            echo "## Accepted upstream revision"
+            echo
+            echo "- Commit: \`$UPSTREAM_SHA\`"
+            echo "- Acceptance: $ACCEPTANCE_RUN_URL"
+            echo "- Pull request: $PR_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch a release when source is already synchronized
+        if: >-
+          steps.upstream.outputs.ready == 'true' &&
+          steps.synchronized.outputs.already == 'true' &&
+          steps.upstream.outputs.released != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-appimage-artifact.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "${{ github.event.repository.default_branch }}" \
+            --field publish_release=true \
+            --field expected_dmg_http_key="${{ steps.dmg.outputs.http_key }}"
+          {
+            echo "## AppImage release dispatched"
+            echo
+            echo "- Upstream commit: \`${{ steps.upstream.outputs.sha }}\`"
+            echo "- DMG HTTP identity: \`${{ steps.dmg.outputs.http_key }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

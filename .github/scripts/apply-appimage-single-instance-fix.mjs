@@ -12,34 +12,28 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const PATCH_ID = "downstream-appimage-stable-instance-v1";
+const PATCH_ID = "downstream-appimage-stable-instance-v2";
 const PATCH_MARKER = `# ${PATCH_ID}`;
 const DEFAULT_TARGET = "launcher/start.sh.template";
 const EXACT_PATH_GUARD =
   '    pid_arg0_matches_path "$actual" "$expected" || return 1';
 const APPIMAGE_AWARE_GUARD = `    if ! pid_arg0_matches_path "$actual" "$expected"; then
         # ${PATCH_ID}
-        # AppImage invocations mount at different temporary paths. Match a
-        # running Electron from the same AppImage file and application identity.
-        [ -n "\${APPIMAGE:-}" ] || return 1
+        # AppImage invocations mount at different temporary paths. Match the
+        # same application identity at the same path inside another AppImage mount.
         [ -n "\${APPDIR:-}" ] || return 1
-        case "$expected" in
-            "$APPDIR"/*) ;;
+        local expected_relative
+        expected_relative="\${expected#"$APPDIR"/}"
+        [ "$expected_relative" != "$expected" ] || return 1
+        case "$APPDIR" in
+            /tmp/.mount_*) ;;
             *) return 1 ;;
         esac
-        case "\${actual##*/}" in
-            electron|electron\\ *) ;;
+        case "$actual" in
+            /tmp/.mount_*/"$expected_relative"|/tmp/.mount_*/"$expected_relative "*) ;;
             *) return 1 ;;
         esac
         pid_matches_app_identity "$pid" || return 1
-        [ "$(pid_environ_value "$pid" APPIMAGE 2>/dev/null || true)" = "$APPIMAGE" ] || return 1
-        local process_appdir
-        process_appdir="$(pid_environ_value "$pid" APPDIR 2>/dev/null || true)"
-        [ -n "$process_appdir" ] || return 1
-        case "$actual" in
-            "$process_appdir"/*) ;;
-            *) return 1 ;;
-        esac
     fi`;
 
 export class PatchFailure extends Error {
@@ -226,12 +220,11 @@ function validatePatched(source) {
   const block = functionBlock(source, "pid_matches_executable");
   const requiredFragments = [
     'if ! pid_arg0_matches_path "$actual" "$expected"; then',
-    '[ -n "${APPIMAGE:-}" ] || return 1',
     '[ -n "${APPDIR:-}" ] || return 1',
-    'case "$expected" in',
-    'case "${actual##*/}" in',
-    'pid_environ_value "$pid" APPIMAGE',
-    'pid_environ_value "$pid" APPDIR',
+    'expected_relative="${expected#"$APPDIR"/}"',
+    '[ "$expected_relative" != "$expected" ] || return 1',
+    'case "$APPDIR" in',
+    '/tmp/.mount_*/"$expected_relative"|/tmp/.mount_*/"$expected_relative "*)',
     'pid_matches_app_identity "$pid" || return 1',
     'pid_is_current_user "$pid" || return 1',
     '! pid_is_electron_helper "$pid"',
@@ -243,6 +236,25 @@ function validatePatched(source) {
       "E_PATCH_POSTCONDITION",
       "The patch marker is present, but pid_matches_executable() is missing required behavior.",
       missing.map((fragment) => `Missing: ${fragment}`),
+      [
+        "Treat the target as partially patched and do not publish its AppImage.",
+        "Rebuild from a clean checkout, then rerun the transform.",
+      ],
+    );
+  }
+
+  const forbiddenFragments = [
+    'pid_environ_value "$pid" APPIMAGE',
+    'pid_environ_value "$pid" APPDIR',
+  ];
+  const unexpected = forbiddenFragments.filter((fragment) =>
+    block.includes(fragment),
+  );
+  if (unexpected.length > 0) {
+    throw new PatchFailure(
+      "E_PATCH_POSTCONDITION",
+      "The AppImage fallback depends on process environment values that Electron clears at runtime.",
+      unexpected.map((fragment) => `Unexpected: ${fragment}`),
       [
         "Treat the target as partially patched and do not publish its AppImage.",
         "Rebuild from a clean checkout, then rerun the transform.",

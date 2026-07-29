@@ -1952,6 +1952,10 @@ function currentBootstrapUpdaterBundleFixture() {
   ].join("");
 }
 
+function currentSparkleUpdateMenuContractFixture() {
+  return "if(!u.hasUpdater()){let e=u.getUnavailableReason()??`unknown`;return e}u.checkForUpdates()";
+}
+
 function latestAvatarOverlayBundleFixture() {
   return [
     "let c=require(`electron`),h=require(`node:child_process`);",
@@ -7148,6 +7152,108 @@ test("adds Linux package updater to current bootstrap updater wiring", () => {
   assert.match(patched, /e\.stdout\?\.includes\(`Manual install required:`\)\?await codexLinuxShowUpdateMessage/);
   assert.match(patched, /refresh:async\(\)=>\{if\(await c\)\{try\{await codexLinuxRefreshUpdateState\(\)\}/);
   assert.doesNotMatch(patched, /codexLinuxRunUpdateManager\(\[`status`,`--json`\]\)/);
+});
+
+test("implements the current Sparkle AppView, menu, and RPC contract on Linux", () => {
+  const patched = applyLinuxAppUpdaterBridgePatch(currentBootstrapUpdaterBundleFixture());
+
+  assert.match(patched, /getDownloadProgressPercent:\(\)=>null/);
+  assert.match(patched, /getDownloadedUpdateAppBrand:\(\)=>null/);
+  assert.match(patched, /getInstallProgressPercent:\(\)=>r/);
+  assert.match(patched, /getIsUpdateReady:\(\)=>s&&t/);
+  assert.match(patched, /getUpdateLifecycleState:\(\)=>s\?n:`idle`/);
+  assert.match(patched, /getRelaunchNotice:\(\)=>null/);
+  assert.match(patched, /hasUpdater:\(\)=>s/);
+  assert.match(
+    patched,
+    /getUnavailableReason:\(\)=>s\?null:`Linux package update manager unavailable`/,
+  );
+  assert.match(patched, /setSparkleQueryParams:\(\)=>\{\}/);
+});
+
+test("keeps the current Sparkle menu contract callable across Linux updater probe outcomes", async () => {
+  const patched = applyLinuxAppUpdaterBridgePatch(currentBootstrapUpdaterBundleFixture());
+  const bridgeEnd = patched.indexOf(";var g6=");
+  assert.notEqual(bridgeEnd, -1);
+
+  const requiredMenuMethods = [
+    ...new Set(
+      [...currentSparkleUpdateMenuContractFixture().matchAll(/u\.([A-Za-z_$][\w$]*)\(/g)]
+        .map((match) => match[1]),
+    ),
+  ];
+  assert.deepEqual(requiredMenuMethods, [
+    "hasUpdater",
+    "getUnavailableReason",
+    "checkForUpdates",
+  ]);
+
+  const createManager = (probeError = null) => {
+    const calls = [];
+    const context = {
+      process: { env: {} },
+      require(moduleName) {
+        if (moduleName === "electron") {
+          return {};
+        }
+        if (moduleName === "node:path") {
+          return path;
+        }
+        if (moduleName === "node:fs") {
+          return { existsSync: () => false };
+        }
+        if (moduleName === "node:child_process") {
+          return {
+            execFile(command, args, _options, callback) {
+              calls.push([command, ...args]);
+              if (args[0] === "--help" && probeError != null) {
+                callback(probeError, "", "probe failed");
+                return;
+              }
+              callback(null, "", "");
+            },
+          };
+        }
+        throw new Error(`Unexpected module request: ${moduleName}`);
+      },
+      setTimeout,
+    };
+    vm.runInNewContext(
+      `${patched.slice(0, bridgeEnd)};globalThis.createManager=codexLinuxCreatePackageUpdateManager`,
+      context,
+    );
+    return { calls, manager: context.createManager({ send() {} }).manager };
+  };
+
+  const available = createManager();
+  for (const methodName of requiredMenuMethods) {
+    assert.equal(typeof available.manager[methodName], "function");
+  }
+  assert.equal(available.manager.hasUpdater(), false);
+  assert.equal(
+    available.manager.getUnavailableReason(),
+    "Linux package update manager unavailable",
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(available.manager.hasUpdater(), true);
+  assert.equal(available.manager.getUnavailableReason(), null);
+  await available.manager.checkForUpdates();
+  assert.deepEqual(available.calls, [
+    ["codex-update-manager", "--help"],
+    ["codex-update-manager", "check-now"],
+  ]);
+
+  const unavailable = createManager(new Error("probe failed"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(unavailable.manager.hasUpdater(), false);
+  assert.equal(
+    unavailable.manager.getUnavailableReason(),
+    "Linux package update manager unavailable",
+  );
+  await unavailable.manager.checkForUpdates();
+  assert.deepEqual(unavailable.calls, [["codex-update-manager", "--help"]]);
 });
 
 test("fails soft when the current updater callback bridge drifts", () => {

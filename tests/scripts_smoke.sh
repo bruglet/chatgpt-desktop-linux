@@ -622,8 +622,10 @@ SCRIPT
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/linux-target-context.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/descriptor.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/engine.js"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/integrity-error.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/runner.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/lib/assets.js"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/lib/composition-delegation.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/lib/minified-js.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/lib/settings-keys.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/patches/impl/webview/index.js"
@@ -8800,7 +8802,20 @@ test_linux_file_manager_patch_smoke() {
     node "$REPO_DIR/scripts/patch-linux-window-ui.js" "$extracted" >"$output_log" 2>&1
     assert_contains "$extracted/.vite/build/main-test.js" 'detect:()=>`linux-file-manager`'
     assert_contains "$extracted/.vite/build/main-test.js" 'linux:{label:`File Manager`'
-    assert_contains "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&(D.on(`system-context-menu`,e=>e.preventDefault()),D.removeMenu()),process.platform===`win32`&&D.removeMenu(),'
+    node - "$extracted/.vite/build/main-test.js" <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+const expected =
+  "process.platform===`linux`&&" +
+  "(process.env.XDG_SESSION_TYPE??``).trim().toLowerCase()===`x11`&&" +
+  "/(^|:)gnome(:|$)/i.test((process.env.XDG_CURRENT_DESKTOP??``).trim())&&" +
+  "D.on(`system-context-menu`,e=>e.preventDefault())," +
+  "process.platform===`linux`&&D.removeMenu()," +
+  "process.platform===`win32`&&D.removeMenu(),";
+if (!source.includes(expected)) {
+  throw new Error("Expected the generic window listener to be scoped to GNOME/X11");
+}
+NODE
     assert_not_contains "$extracted/.vite/build/main-test.js" 'D.setMenuBarVisibility(!1)'
     assert_contains "$extracted/.vite/build/main-test.js" '&&D.setIcon('
     assert_contains "$extracted/webview/assets/app-initial-test.js" '`subAgent`in e?e.subAgent:`subagent`in e?e.subagent:null'
@@ -8811,6 +8826,90 @@ test_linux_file_manager_patch_smoke() {
     assert_occurrence_count "$extracted/webview/assets/app-initial-test.js" '`subagent`in e?e.subagent' '1'
     assert_occurrence_count "$extracted/webview/assets/app-initial-test.js" 'Zl(e.agent_nickname)' '1'
     assert_not_contains "$output_log" 'Failed to apply Linux File Manager Patch'
+}
+
+test_linux_titlebar_context_menu_patch_smoke() {
+    info "Checking managed-window Linux titlebar context-menu patch behavior"
+    local workspace="$TMP_DIR/titlebar-context-menu-patch"
+    local extracted="$workspace/extracted"
+    local first_report="$workspace/first-report.json"
+    local second_report="$workspace/second-report.json"
+    local output_log="$workspace/output.log"
+    local first_hash
+    local second_hash
+    local bundle_body
+
+    mkdir -p "$workspace"
+    bundle_body='const electron=require(`electron`);class WindowManager{registerWindow(){}async createWindow(e={}){let t=process.platform===`win32`&&(e.appearance??`primary`)===`primary`?electron.screen.getPrimaryDisplay().workArea:null,{appearance:o=`primary`}=e,N=new electron.BrowserWindow({});(process.platform===`win32`||process.platform===`linux`)&&N.removeMenu(),this.registerWindow(N,0,!0,o,`register`);host.on(`did-create-window`,()=>{let e=new electron.BrowserWindow({});process.platform===`win32`&&e.removeMenu(),e.show()});return N}}'
+    make_fake_extracted_asar "$extracted" "$bundle_body"
+
+    node "$REPO_DIR/scripts/patch-linux-window-ui.js" \
+        --report-json "$first_report" \
+        "$extracted" >"$output_log" 2>&1
+    assert_occurrence_count \
+        "$extracted/.vite/build/main-test.js" \
+        'system-context-menu' \
+        '2'
+    node - "$extracted/.vite/build/main-test.js" <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+const expected =
+  "process.platform===`linux`&&" +
+  "(process.env.XDG_SESSION_TYPE??``).trim().toLowerCase()===`x11`&&" +
+  "/(^|:)gnome(:|$)/i.test((process.env.XDG_CURRENT_DESKTOP??``).trim())&&" +
+  "N.on(`system-context-menu`,e=>e.preventDefault())," +
+  "(process.platform===`win32`||process.platform===`linux`)&&N.removeMenu(),";
+if (!source.includes(expected)) {
+  throw new Error("Expected the managed-window listener to be scoped to GNOME/X11");
+}
+const popupExpected =
+  "process.platform===`linux`&&" +
+  "(process.env.XDG_SESSION_TYPE??``).trim().toLowerCase()===`x11`&&" +
+  "/(^|:)gnome(:|$)/i.test((process.env.XDG_CURRENT_DESKTOP??``).trim())&&" +
+  "e.on(`system-context-menu`,e=>e.preventDefault())," +
+  "process.platform===`linux`&&e.removeMenu()," +
+  "process.platform===`win32`&&e.removeMenu(),";
+if (!source.includes(popupExpected)) {
+  throw new Error("Expected the popup listener to be scoped to GNOME/X11");
+}
+NODE
+    node - "$first_report" <<'NODE'
+const fs = require("node:fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const entry = report.patches.find(
+  (patch) => patch.name === "linux-managed-window-system-context-menu",
+);
+if (entry?.status !== "applied") {
+  throw new Error(`Expected managed-window patch to be applied, got ${entry?.status}`);
+}
+if (entry?.ciPolicy !== "optional") {
+  throw new Error(`Expected managed-window patch to be optional, got ${entry?.ciPolicy}`);
+}
+if (
+  JSON.stringify(entry.strategies) !==
+  JSON.stringify([{ group: "linux-managed-window-menu", strategy: "upstream-combined" }])
+) {
+  throw new Error(`Unexpected managed-window strategy: ${JSON.stringify(entry?.strategies)}`);
+}
+NODE
+
+    first_hash="$(sha256sum "$extracted/.vite/build/main-test.js" | awk '{print $1}')"
+    node "$REPO_DIR/scripts/patch-linux-window-ui.js" \
+        --report-json "$second_report" \
+        "$extracted" >"$output_log" 2>&1
+    second_hash="$(sha256sum "$extracted/.vite/build/main-test.js" | awk '{print $1}')"
+    [ "$second_hash" = "$first_hash" ] \
+        || fail "Expected second titlebar context-menu patch pass to preserve the main bundle hash"
+    node - "$second_report" <<'NODE'
+const fs = require("node:fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const entry = report.patches.find(
+  (patch) => patch.name === "linux-managed-window-system-context-menu",
+);
+if (entry?.status !== "already-applied") {
+  throw new Error(`Expected managed-window patch to be idempotent, got ${entry?.status}`);
+}
+NODE
 }
 
 test_linux_translucent_sidebar_default_patch_smoke() {
@@ -10971,6 +11070,7 @@ main() {
     test_webview_probe_equivalence
     test_side_by_side_launcher_identity
     test_linux_file_manager_patch_smoke
+    test_linux_titlebar_context_menu_patch_smoke
     test_linux_translucent_sidebar_default_patch_smoke
     test_keybinds_settings_tab_patch_smoke
     test_keybinds_settings_patch_warns_on_bundle_shape_miss

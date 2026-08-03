@@ -47,6 +47,7 @@ cd codex-desktop-linux
 | Platform | Recommended path | Notes |
 |---|---|---|
 | Debian, Ubuntu, Pop!_OS, Mint, Elementary | `make bootstrap-native` | Builds and installs a `.deb` |
+| Raspberry Pi 5 (64-bit) | `make bootstrap-native` | Validated on a 16 GB Pi 5; see [Raspberry Pi 5](docs/raspberry-pi-5.md) |
 | Fedora | `make bootstrap-native` | Builds and installs an `.rpm` |
 | openSUSE | `make bootstrap-native` | Builds and installs an `.rpm` |
 | Arch, Manjaro, EndeavourOS | `make bootstrap-native` | Builds and installs a pacman package |
@@ -360,6 +361,7 @@ Full list: [Troubleshooting](docs/troubleshooting.md).
 ## Project Docs
 
 - [Native setup](docs/native-setup.md)
+- [Raspberry Pi 5](docs/raspberry-pi-5.md)
 - [Nix](docs/nix.md)
 - [Linux Computer Use](docs/linux-computer-use.md)
 - [Record and Replay on Linux](docs/record-and-replay-linux.md)

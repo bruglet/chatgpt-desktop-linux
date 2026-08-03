@@ -7752,6 +7752,10 @@ test("adds Linux package updater to current bootstrap updater wiring", () => {
   assert.match(patched, /s=codexLinuxPackageUpdateBridge\.manager/);
   assert.match(patched, /te=codexLinuxPackageUpdateBridge\.quitForUpdate/);
   assert.match(patched, /async function codexLinuxProbeUpdateManager\(\)/);
+  assert.match(patched, /require\(`node:child_process`\)\.execFile\(codexLinuxUpdateManagerPath\(\)/);
+  assert.match(patched, /require\(`node:fs`\)\.existsSync\(e\)/);
+  assert.match(patched, /require\(`node:path`\)\.join/);
+  assert.doesNotMatch(patched, /__codexChild\.execFile\(codexLinuxUpdateManagerPath\(\)/);
   assert.match(patched, /codexLinuxRunUpdateManager\(\[`--help`\]\)/);
   assert.match(patched, /async function codexLinuxRefreshUpdateState\(\)\{return codexLinuxReadUpdateState\(\)\}/);
   assert.match(patched, /codexLinuxProbeUpdateManager\(\)\.then\(\(\)=>\{s=!0,i\(\),a\(\);return!0\}\)/);
@@ -7762,6 +7766,23 @@ test("adds Linux package updater to current bootstrap updater wiring", () => {
   assert.match(patched, /e\.stdout\?\.includes\(`Manual install required:`\)\?await codexLinuxShowUpdateMessage/);
   assert.match(patched, /refresh:async\(\)=>\{if\(await c\)\{try\{await codexLinuxRefreshUpdateState\(\)\}/);
   assert.doesNotMatch(patched, /codexLinuxRunUpdateManager\(\[`status`,`--json`\]\)/);
+});
+
+test("does not reuse function-scoped module bindings in the Linux updater bridge", () => {
+  const source =
+    "function helper(){let __codexChild=require(`node:child_process`)," +
+    "__codexFs=require(`node:fs`),__codexPath=require(`node:path`);" +
+    "return[__codexChild,__codexFs,__codexPath]}" +
+    currentBootstrapUpdaterBundleFixture();
+
+  const patched = applyLinuxAppUpdaterBridgePatch(source);
+
+  assert.match(patched, /require\(`node:child_process`\)\.execFile\(codexLinuxUpdateManagerPath\(\)/);
+  assert.match(patched, /require\(`node:fs`\)\.existsSync\(e\)/);
+  assert.match(patched, /require\(`node:path`\)\.join/);
+  assert.doesNotMatch(patched, /__codexChild\.execFile\(codexLinuxUpdateManagerPath\(\)/);
+  assert.doesNotMatch(patched, /__codexFs\.existsSync\(e\)/);
+  assert.doesNotMatch(patched, /__codexPath\.join/);
 });
 
 test("implements the current Sparkle AppView, menu, and RPC contract on Linux", () => {

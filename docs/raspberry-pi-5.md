@@ -86,19 +86,66 @@ The following checks passed on the test Pi:
 - workspace file creation and editing
 - integrated command execution
 - Python, SQLite, automated test, and local Git workflows
+- a Chromium publishing workflow using Linux Computer Use for screen capture,
+  accessible element discovery, and global pointer and keyboard input, with
+  external manual `wlrctl` shell commands for Labwc window listing and focus
 
 ## Optional capability results
 
-Browser Use and Computer Use were not available in the validated Pi session.
-The core workflow test did not diagnose a single cause for both features, so
-their absence should not be attributed solely to ARM64. Computer Use UI access
-can also depend on local opt-in and upstream account rollout.
+A combined Chromium workflow was validated on the Labwc Wayland session after
+the desktop-control dependencies were completed. Initially, screenshots worked,
+but accessibility discovery, pointer input, and keyboard input were incomplete.
+Labwc is not currently a supported window-control backend, so window listing
+and focus were supplied separately through manual `wlrctl` shell commands.
+
+The successful Pi configuration added:
+
+- `at-spi2-core` and toolkit accessibility for AT-SPI element discovery
+- external manual use of `wlrctl` for window listing and focus through Labwc's
+  wlroots foreign-toplevel interface; the Computer Use backend did not invoke
+  these commands
+- an ARM64 build of `ydotool` 1.0.3 or newer and an enabled per-user
+  `ydotoold.service`
+- membership of the desktop user in the `input` group
+
+A scoped udev rule granted the `input` group read/write access to
+`/dev/uinput`:
+
+```udev
+KERNEL=="uinput", GROUP="input", MODE="0660"
+```
+
+Debian 13 did not offer a `ydotool` package on the validated image, so
+`ydotool` and `ydotoold` were built for ARM64 and installed under
+`/usr/local/bin`. The daemon exposed its socket at
+`$XDG_RUNTIME_DIR/.ydotool_socket`. See [Linux Computer Use](linux-computer-use.md)
+for the general dependency, daemon, UI opt-in, and supported-backend readiness
+instructions.
+
+The final test combined Linux Computer Use screen capture, AT-SPI inspection,
+and global pointer and keyboard input with external `wlrctl` shell focus to
+open an external user-owned web application, complete a content form, publish
+a persistent test item, and read back its public URL. One initial keyboard
+attempt reached the wrong window; the manual focus step was added before the
+successful retry.
+
+The public item verifies that the combined workflow published and persisted the
+result. It does not establish that the backend's built-in `list_windows`,
+`focused_window`, or targeted-input verification supported Labwc. Treat those
+window-control capabilities as unavailable on Labwc until a dedicated backend
+is implemented.
+
+Granting access to `/dev/uinput` and running `ydotoold` allows synthetic input.
+Limit access to trusted local users, keep the device rule group-scoped, and do
+not use a world-writable device mode.
 
 One known architecture-specific gap remains: the repository's Browser Use
 `node_repl` fallback resource is currently x86-64-only when no compatible
-upstream or user-supplied ARM64 binary is available. Treat Browser Use and
-Computer Use as unavailable on this validated baseline until separate ARM64
-testing demonstrates otherwise.
+upstream or user-supplied ARM64 binary is available. The Browser and Chrome
+plugins were enabled and discoverable during this test, but the demonstrated
+workflow used Chromium through Linux Computer Use. Treat Browser Use as a
+separate capability until its execution path is independently validated on
+ARM64.
 
 ## Remaining validation
 

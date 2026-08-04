@@ -39,6 +39,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Wrapper update checks no longer offer rebuilds when every change since the
+  installed commit is limited to repository documentation or metadata.
 - The updater feature picker now changes only the enabled feature list, preserving
   nested feature settings and other local configuration keys across rebuilds.
 - The opt-in Dock icon tweak now targets the current upstream main-process

@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const path = require("node:path");
 
 const socketPath = process.argv[2];
 if (!socketPath) {
@@ -21,7 +22,8 @@ function readProcess(pid) {
     const procStat = fs.statSync(procPath);
     const rawStat = fs.readFileSync(`${procPath}/stat`, "utf8");
     const commandEnd = rawStat.lastIndexOf(")");
-    if (commandEnd < 0) return null;
+    const commandStart = rawStat.indexOf("(");
+    if (commandStart < 0 || commandEnd < 0) return null;
     const fields = rawStat.slice(commandEnd + 2).trim().split(/\s+/);
     const commandLine = fs
       .readFileSync(`${procPath}/cmdline`)
@@ -34,6 +36,7 @@ function readProcess(pid) {
       state: fields[0],
       ppid: Number(fields[1]),
       startTime: fields[19] ?? null,
+      comm: rawStat.slice(commandStart + 1, commandEnd),
       commandLine,
     };
   } catch (error) {
@@ -109,15 +112,42 @@ function isExpectedAuthority(processInfo) {
   );
 }
 
+function isVerifiedSystemdUserManager(processInfo) {
+  const executable = processInfo.commandLine[0];
+  return (
+    processInfo.comm === "systemd" &&
+    path.isAbsolute(executable) &&
+    path.basename(executable) === "systemd" &&
+    processInfo.commandLine.includes("--user")
+  );
+}
+
+function hasExpectedOrphanAdoption(authority) {
+  if (authority.ppid === 1) return true;
+
+  const adopter = readProcess(authority.ppid);
+  return (
+    adopter != null &&
+    isRunning(adopter) &&
+    (expectedUid == null || adopter.uid === expectedUid) &&
+    adopter.ppid === 1 &&
+    isVerifiedSystemdUserManager(adopter)
+  );
+}
+
+function isExpectedLockedAuthority(lock, authority) {
+  return (
+    authority != null &&
+    authority.startTime === lock.authorityStartTime &&
+    (expectedUid == null || authority.uid === expectedUid) &&
+    hasExpectedOrphanAdoption(authority) &&
+    isExpectedAuthority(authority)
+  );
+}
+
 function verifiedOrphanTargets(lock, listeners) {
   const authority = readProcess(lock.authorityPid);
-  if (
-    authority == null ||
-    authority.startTime !== lock.authorityStartTime ||
-    (expectedUid != null && authority.uid !== expectedUid) ||
-    authority.ppid !== 1 ||
-    !isExpectedAuthority(authority)
-  ) {
+  if (!isExpectedLockedAuthority(lock, authority)) {
     throw new Error("locked authority is not the expected reparented Codex process");
   }
 
@@ -220,12 +250,14 @@ async function reapOrphan() {
   const targets = verifiedOrphanTargets(lock, listeners);
 
   const verifiedInodes = listenerInodes();
+  const currentAuthority = readProcess(lock.authorityPid);
   if (
     !unchangedLock(lock) ||
     !ownerIsDead(lock.ownerPid, lock.ownerStartTime) ||
     socketPathState(socket) !== "same" ||
     verifiedInodes.length !== 1 ||
     verifiedInodes[0] !== inode ||
+    !isExpectedLockedAuthority(lock, currentAuthority) ||
     targets.some((target) => !isRunning(target))
   ) {
     throw new Error("shared app-server ownership changed during orphan verification");

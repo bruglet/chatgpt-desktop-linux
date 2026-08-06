@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- A disabled-by-default `deferred-update-build` Linux feature adds a **Build
+  updates automatically** setting. Turning it off keeps notification and DMG
+  verification active while deferring local package builds until an explicit
+  **Check for updates**.
 - The embedded Computer Use backend is synchronized to standalone v0.4.6 as
   `0.4.6-linux-alpha1`, including generic X11/EWMH window control, X11
   `xdotool` keyboard, text, and coordinate-click input, KDE portal scroll
@@ -39,6 +43,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Deferred upstream DMGs are revalidated before a build. A newer candidate
+  supersedes the pending download, and a deleted cached DMG is redownloaded in
+  the same explicit check. Fresh app-launch checks preserve the stable deferred
+  candidate without an upstream DMG request; stale checks use HEAD and reuse a valid
+  unchanged cached DMG, while offline checks leave it pending. The optional
+  state marker retains the existing `update_detected` status so updater 0.10.x
+  can read the state and resume its previous automatic-build behavior. State
+  written by prerelease builds using `update_available` is migrated back to
+  `update_detected` on read.
 - Native X11 coordinate clicks now use one supervised xdotool XTEST command,
   fall back to ydotool only when xdotool cannot launch, and preserve nested X11
   session identity instead of importing a host Wayland display.

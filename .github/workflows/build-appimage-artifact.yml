@@ -47,15 +47,6 @@ jobs:
         with:
           node-version: 24
 
-      - name: Verify and apply downstream AppImage single-instance fix
-        run: |
-          set -euo pipefail
-          node .github/scripts/apply-appimage-single-instance-fix.test.mjs
-          node .github/scripts/apply-appimage-single-instance-fix.mjs --check
-          node .github/scripts/apply-appimage-single-instance-fix.mjs --apply
-          node .github/scripts/apply-appimage-single-instance-fix.mjs --verify
-          bash -n launcher/start.sh.template
-
       - name: Install build dependencies
         run: |
           set -euo pipefail
@@ -198,9 +189,6 @@ jobs:
             echo "Expected exactly one packaged launcher, found ${#packaged_launchers[@]}" >&2
             exit 1
           fi
-          node .github/scripts/apply-appimage-single-instance-fix.mjs \
-            --verify "${packaged_launchers[0]}"
-
           sha256sum "$appimage" > dist/SHA256SUMS
           artifact_name="$(basename "$appimage")"
           {

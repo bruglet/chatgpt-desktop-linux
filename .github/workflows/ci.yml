@@ -39,6 +39,7 @@ jobs:
           bash -n scripts/build-rpm.sh
           bash -n scripts/build-pacman.sh
           bash -n scripts/build-appimage.sh
+          bash -n scripts/ci/download-upstream-dmg.sh
           bash -n scripts/ci/update-nix-hashes.sh
           bash -n scripts/ci/validate-nix-pins.sh
 
@@ -291,6 +292,7 @@ jobs:
             .#codex-desktop-computer-use-ui
             .#codex-desktop-remote-mobile-control
             .#codex-desktop-computer-use-ui-remote-mobile-control
+            .#checks.x86_64-linux.nix-pipewire-alsa-wrapper
             .#checks.x86_64-linux.nix-gsettings-schema-wrapper
             .#checks.x86_64-linux.watchdog-linux-features
           )

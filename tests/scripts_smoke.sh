@@ -3980,7 +3980,7 @@ make_update_nix_hash_fixture() {
   };
 }
 EOF
-    printf '%s\n' '{"dependencies":{"electron":"42.1.0","better-sqlite3":"12.9.0","node-pty":"1.1.0"}}' \
+    printf '%s\n' '{"dependencies":{"@parcel/watcher":"2.5.6","electron":"42.1.0","better-sqlite3":"12.9.0","node-pty":"1.1.0"}}' \
         > "$fixture/nix/native-modules/package.json"
     printf '%s\n' '{"name":"native-modules","lockfileVersion":3,"packages":{}}' \
         > "$fixture/nix/native-modules/package-lock.json"
@@ -3990,7 +3990,8 @@ EOF
 set -euo pipefail
 echo "validate stub invoked"
 if [ "${VALIDATE_PIN_CHANGE:-0}" = "1" ]; then
-    python3 - "$REPO_DIR/flake.nix" <<'PY'
+    python3 - "$REPO_DIR/flake.nix" "$REPO_DIR/nix/native-modules/package.json" <<'PY'
+import json
 from pathlib import Path
 import re
 import sys
@@ -3999,6 +4000,11 @@ path = Path(sys.argv[1])
 text = path.read_text()
 text = re.sub(r'(codexVersion\s*=\s*")[^"]+(";)', r'\g<1>99.0.0\2', text, count=1)
 path.write_text(text)
+
+package_path = Path(sys.argv[2])
+package = json.loads(package_path.read_text())
+package["dependencies"]["@parcel/watcher"] = "2.5.7"
+package_path.write_text(json.dumps(package, indent=2) + "\n")
 PY
 fi
 EOF
@@ -4114,6 +4120,9 @@ test_update_nix_hashes_verifies_changed_pins() {
     assert_contains "$fixture/output.log" "Nix builds succeeded after refreshing the upstream pins and Codex.dmg hash."
     assert_contains "$fixture/calls.log" "nix-store --add-fixed"
     assert_contains "$fixture/calls.log" "nix build"
+    assert_contains "$fixture/calls.log" "npm install --package-lock-only --ignore-scripts"
+    [ "$(node -p "require('$fixture/nix/native-modules/package.json').dependencies['@parcel/watcher']")" = "2.5.7" ] || \
+        fail "Expected @parcel/watcher pin refresh to update package.json"
 }
 
 test_update_nix_hashes_verifies_changed_dmg_hash() {
@@ -4614,6 +4623,7 @@ test_native_module_rebuild_uses_local_electron_rebuild_toolchain() {
     mkdir -p "$app_dir/node_modules/better-sqlite3" "$app_dir/node_modules/node-pty" "$fake_bin"
     printf '%s\n' '{"version":"12.9.0"}' > "$app_dir/node_modules/better-sqlite3/package.json"
     printf '%s\n' '{"version":"1.1.0"}' > "$app_dir/node_modules/node-pty/package.json"
+    printf '%s\n' '{"dependencies":{"@parcel/watcher":"2.5.6"}}' > "$app_dir/package.json"
 
     cat > "$fake_bin/npm" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -4672,6 +4682,14 @@ case "$args" in
         printf '%s\n' '{"version":"1.1.0"}' > node_modules/node-pty/package.json
         ;;
 esac
+case "$args" in
+    *" @parcel/watcher@2.5.6 "*)
+        prefix="${args#* --prefix }"
+        prefix="${prefix%% *}"
+        mkdir -p "$prefix/node_modules/@parcel/watcher" "$prefix/node_modules/@parcel/watcher-linux-x64-glibc"
+        printf '%s\n' '{"version":"2.5.6"}' > "$prefix/node_modules/@parcel/watcher/package.json"
+        ;;
+esac
 SCRIPT
     chmod +x "$fake_bin/npm"
 
@@ -4728,14 +4746,43 @@ test_native_module_rebuild_accepts_prebuilt_source() {
     mkdir -p \
         "$app_dir/node_modules/better-sqlite3" \
         "$app_dir/node_modules/node-pty" \
+        "$source_dir/@parcel/watcher" \
+        "$source_dir/@parcel/watcher-linux-x64-glibc" \
+        "$source_dir/detect-libc" \
+        "$source_dir/is-extglob" \
+        "$source_dir/is-glob" \
+        "$source_dir/node-addon-api" \
+        "$source_dir/picomatch" \
         "$source_dir/better-sqlite3/build/Release" \
         "$source_dir/node-pty/build/Release"
     printf '%s\n' '{"version":"12.9.0"}' > "$app_dir/node_modules/better-sqlite3/package.json"
     printf '%s\n' '{"version":"1.1.0"}' > "$app_dir/node_modules/node-pty/package.json"
+    printf '%s\n' '{"dependencies":{"@parcel/watcher":"2.5.6"}}' > "$app_dir/package.json"
     printf '%s\n' stale > "$app_dir/node_modules/better-sqlite3/old.txt"
 
     printf '%s\n' '{"version":"12.9.0"}' > "$source_dir/better-sqlite3/package.json"
     printf '%s\n' '{"version":"1.1.0"}' > "$source_dir/node-pty/package.json"
+    printf '%s\n' '{"version":"2.5.6","main":"index.js","dependencies":{"detect-libc":"2.0.4","is-glob":"4.0.3","node-addon-api":"7.1.1","picomatch":"4.0.3"},"optionalDependencies":{"@parcel/watcher-linux-x64-glibc":"2.5.6"}}' \
+        > "$source_dir/@parcel/watcher/package.json"
+    cat > "$source_dir/@parcel/watcher/index.js" <<'JS'
+require("detect-libc");
+require("is-glob");
+require("node-addon-api");
+require("picomatch");
+require("@parcel/watcher-linux-x64-glibc");
+module.exports = { subscribe() {} };
+JS
+    printf '%s\n' '{"version":"2.5.6","main":"index.js"}' \
+        > "$source_dir/@parcel/watcher-linux-x64-glibc/package.json"
+    printf '%s\n' 'module.exports = {};' > "$source_dir/@parcel/watcher-linux-x64-glibc/index.js"
+    for dependency in detect-libc is-extglob node-addon-api picomatch; do
+        printf '%s\n' "{\"name\":\"$dependency\",\"version\":\"1.0.0\",\"main\":\"index.js\"}" \
+            > "$source_dir/$dependency/package.json"
+        printf '%s\n' 'module.exports = {};' > "$source_dir/$dependency/index.js"
+    done
+    printf '%s\n' '{"name":"is-glob","version":"4.0.3","main":"index.js","dependencies":{"is-extglob":"2.1.1"}}' \
+        > "$source_dir/is-glob/package.json"
+    printf '%s\n' 'require("is-extglob"); module.exports = () => false;' > "$source_dir/is-glob/index.js"
     : > "$source_dir/better-sqlite3/build/Release/better_sqlite3.node"
     : > "$source_dir/better-sqlite3/build/Release/junk.o"
     : > "$source_dir/node-pty/build/Release/pty.node"
@@ -4757,6 +4804,13 @@ test_native_module_rebuild_accepts_prebuilt_source() {
     assert_contains "$output_log" "Using prebuilt native modules from $source_dir"
     assert_file_exists "$app_dir/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
     assert_file_exists "$app_dir/node_modules/node-pty/build/Release/pty.node"
+    assert_file_exists "$app_dir/node_modules/@parcel/watcher/package.json"
+    assert_file_exists "$app_dir/node_modules/@parcel/watcher-linux-x64-glibc/package.json"
+    assert_file_exists "$app_dir/node_modules/is-extglob/package.json"
+    NODE_PATH="$app_dir/node_modules" node -e '
+const watcher = require("@parcel/watcher");
+if (typeof watcher.subscribe !== "function") process.exit(1);
+' || fail "Expected @parcel/watcher to load from the staged app tree"
     [ ! -f "$app_dir/node_modules/better-sqlite3/old.txt" ] || fail "Expected stale better-sqlite3 module to be replaced"
     [ ! -f "$app_dir/node_modules/better-sqlite3/build/Release/junk.o" ] || fail "Expected better-sqlite3 build junk to be pruned"
     [ ! -f "$app_dir/node_modules/node-pty/build/Release/junk.o" ] || fail "Expected node-pty build junk to be pruned"

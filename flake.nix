@@ -238,6 +238,9 @@
           '';
         };
 
+        nativeModulesManifest = builtins.fromJSON (builtins.readFile ./nix/native-modules/package.json);
+        parcelWatcherVersion = nativeModulesManifest.dependencies."@parcel/watcher";
+
         nativeModulesNodeModules = pkgs.importNpmLock.buildNodeModules {
           npmRoot = ./nix/native-modules;
           inherit (pkgs) nodejs;
@@ -301,6 +304,47 @@
             mkdir -p "$out"
             cp -R node_modules/better-sqlite3 "$out/better-sqlite3"
             cp -R node_modules/node-pty "$out/node-pty"
+            node - "$PWD/node_modules" "$out" "@parcel/watcher" <<'NODE'
+            const fs = require("fs");
+            const path = require("path");
+
+            const [sourceRoot, targetRoot, entryPackage] = process.argv.slice(2);
+            const staged = new Set();
+
+            function packagePath(root, name) {
+              return path.join(root, ...name.split("/"));
+            }
+
+            function stagePackage(name, required) {
+              if (staged.has(name)) return;
+
+              const source = packagePath(sourceRoot, name);
+              if (!fs.existsSync(source)) {
+                if (required) throw new Error("Missing required runtime dependency " + name);
+                return;
+              }
+
+              const manifestPath = path.join(source, "package.json");
+              if (!fs.existsSync(manifestPath)) {
+                throw new Error("Missing package.json for runtime dependency " + name);
+              }
+
+              const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+              const target = packagePath(targetRoot, name);
+              fs.mkdirSync(path.dirname(target), { recursive: true });
+              fs.cpSync(source, target, { recursive: true });
+              staged.add(name);
+
+              for (const dependency of Object.keys(manifest.dependencies || {})) {
+                stagePackage(dependency, true);
+              }
+              for (const dependency of Object.keys(manifest.optionalDependencies || {})) {
+                stagePackage(dependency, false);
+              }
+            }
+
+            stagePackage(entryPackage, true);
+            NODE
             find "$out/better-sqlite3/build" -type f ! -name "*.node" -delete 2>/dev/null || true
             find "$out/node-pty/build" -type f ! -name "*.node" -delete 2>/dev/null || true
             find "$out" -type d -empty -delete 2>/dev/null || true
@@ -838,6 +882,29 @@ PY
 
         checks = {
           notification-actions-linux = codexNotificationActionsBinary;
+          parcel-watcher-staged-runtime = pkgs.runCommand "codex-parcel-watcher-staged-runtime-check" {
+            nativeBuildInputs = [ pkgs.nodejs ];
+          } ''
+            mkdir -p app/node_modules
+            cat > app/package.json <<'EOF'
+            {"dependencies":{"@parcel/watcher":"${parcelWatcherVersion}"}}
+            EOF
+
+            export WORK_DIR="$TMPDIR"
+            info() { echo "[INFO] $*" >&2; }
+            warn() { echo "[WARN] $*" >&2; }
+            error() { echo "[ERROR] $*" >&2; exit 1; }
+            source ${nativeModulesBuildSupport}/scripts/lib/native-modules.sh
+            stage_parcel_watcher_for_linux "$PWD/app" "${codexNativeModules}"
+
+            NODE_PATH="$PWD/app/node_modules" node -e '
+              const watcher = require("@parcel/watcher");
+              if (typeof watcher.subscribe !== "function") {
+                throw new Error("staged @parcel/watcher did not expose subscribe()");
+              }
+            '
+            touch "$out"
+          '';
           notification-actions-installer = pkgs.runCommand "codex-notification-actions-installer-check" { } ''
             grep -F 'CODEX_NOTIFICATION_ACTIONS_SOURCE=' ${installer}/bin/codex-desktop-installer >/dev/null
             touch "$out"

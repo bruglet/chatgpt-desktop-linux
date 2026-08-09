@@ -319,6 +319,38 @@ test("all CI upstream DMG consumers use the non-empty atomic downloader", () => 
   }
 });
 
+test("Nix pin validation reads the unbundled Parcel watcher version from the app manifest", () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, "validate-nix-pins.sh"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /ASAR_EXTRACT_DIR\/package\.json[\s\S]*dependencies\?\.\['@parcel\/watcher'\]/,
+  );
+  assert.doesNotMatch(
+    source,
+    /ASAR_EXTRACT_DIR\/node_modules\/@parcel\/watcher\/package\.json/,
+  );
+});
+
+test("installer reads the unbundled Parcel watcher version from the current app manifest", () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, "../lib/native-modules.sh"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /app\.dependencies\?\.\["@parcel\/watcher"\][\s\S]*app\.optionalDependencies\?\.\["@parcel\/watcher"\]/,
+  );
+  assert.doesNotMatch(
+    source,
+    /require\(path\.join\(appRoot, "node_modules\/@parcel\/watcher\/package\.json"\)\)/,
+  );
+});
+
 test("Nix refresh serializes campaigns and deduplicates refresh and exact-head CI", () => {
   const workflow = fs.readFileSync(
     path.resolve(__dirname, "../../.github/workflows/update-codex-hash.yml"),
@@ -386,6 +418,22 @@ test("Nix hash refresh accepts a validated focused output override", () => {
   assert.match(refreshWorkflow, /\.#checks\.x86_64-linux\.watchdog-linux-features/);
   assert.match(script, /Invalid Nix verification output/);
   assert.match(script, /run_nix_build "\$VERIFY_LOG" "\$\{PACKAGE_OUTPUTS\[@\]\}"/);
+});
+
+test("Parcel watcher runtime check is built by PR and scheduled current-DMG Nix verification", () => {
+  const selector = ".#checks.x86_64-linux.parcel-watcher-staged-runtime";
+  const sources = [
+    path.resolve(__dirname, "../../.github/workflows/ci.yml"),
+    path.resolve(__dirname, "../../.github/workflows/update-codex-hash.yml"),
+  ];
+
+  for (const sourcePath of sources) {
+    const source = fs.readFileSync(sourcePath, "utf8");
+    assert.ok(
+      source.includes(selector),
+      `${path.relative(path.resolve(__dirname, "../.."), sourcePath)} must build ${selector}`,
+    );
+  }
 });
 
 test("local Node syntax checks parse native .js ESM in module mode", () => {

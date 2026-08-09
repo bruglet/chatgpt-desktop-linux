@@ -170,6 +170,74 @@ CPP
     info "Applied GCC 16+ nullptr_t compatibility workaround"
 }
 
+stage_parcel_watcher_for_linux() {
+    local app_extracted="$1"
+    local app_package_json="$app_extracted/package.json"
+    local prebuilt_modules_source="${2:-}"
+    local parcel_watcher_version
+    local prebuilt_watcher_version
+    local watcher_build_dir="$WORK_DIR/parcel-watcher-build"
+    local staged_dependency
+    local staged_dependency_name
+
+    [ -f "$app_package_json" ] || error "Could not find extracted app package.json for @parcel/watcher"
+    parcel_watcher_version="$(node -e '
+const path = require("path");
+const appRoot = process.argv[1];
+const app = require(path.join(appRoot, "package.json"));
+const version = app.dependencies?.["@parcel/watcher"] ?? app.optionalDependencies?.["@parcel/watcher"];
+if (typeof version !== "string" || version.length === 0) process.exit(1);
+process.stdout.write(version);
+' "$app_extracted" 2>/dev/null || true)"
+    [ -n "$parcel_watcher_version" ] || error "Could not detect @parcel/watcher version from extracted app"
+
+    if [ -n "$prebuilt_modules_source" ]; then
+        [ -f "$prebuilt_modules_source/@parcel/watcher/package.json" ] || \
+            error "Prebuilt @parcel/watcher source not found at $prebuilt_modules_source/@parcel/watcher"
+        prebuilt_watcher_version="$(node -p \
+            "require('$prebuilt_modules_source/@parcel/watcher/package.json').version" \
+            2>/dev/null || true)"
+        [ "$prebuilt_watcher_version" = "$parcel_watcher_version" ] || \
+            error "Prebuilt @parcel/watcher version mismatch: expected $parcel_watcher_version, got ${prebuilt_watcher_version:-unknown}"
+
+        # The Nix output is a minimal node_modules-shaped tree containing the
+        # watcher and its complete runtime dependency closure. Copy every entry
+        # except the two native modules already installed and pruned above.
+        for staged_dependency in "$prebuilt_modules_source"/*; do
+            [ -e "$staged_dependency" ] || continue
+            staged_dependency_name="$(basename "$staged_dependency")"
+            case "$staged_dependency_name" in
+                better-sqlite3|node-pty)
+                    continue
+                    ;;
+            esac
+            rm -rf "$app_extracted/node_modules/$staged_dependency_name"
+            cp -a "$staged_dependency" "$app_extracted/node_modules/"
+        done
+    else
+        rm -rf "$watcher_build_dir"
+        mkdir -p "$watcher_build_dir"
+        npm install \
+            --prefix "$watcher_build_dir" \
+            --no-save \
+            --package-lock=false \
+            --ignore-scripts \
+            "@parcel/watcher@$parcel_watcher_version" >&2
+
+        [ -f "$watcher_build_dir/node_modules/@parcel/watcher/package.json" ] || \
+            error "@parcel/watcher was not staged"
+        for staged_dependency in "$watcher_build_dir/node_modules"/*; do
+            [ -e "$staged_dependency" ] || continue
+            rm -rf "$app_extracted/node_modules/$(basename "$staged_dependency")"
+            cp -a "$staged_dependency" "$app_extracted/node_modules/"
+        done
+    fi
+    [ -f "$app_extracted/node_modules/@parcel/watcher/package.json" ] || \
+        error "@parcel/watcher was not copied into the extracted app"
+    find "$app_extracted/node_modules/@parcel" -maxdepth 1 -type d -name 'watcher-linux-*' -print -quit | \
+        grep -q . || error "Linux @parcel/watcher native binding was not staged"
+}
+
 build_native_modules() {
     local app_extracted="$1"
     local max_build_threads="${MAX_BUILD_THREADS:-0}"
@@ -211,6 +279,7 @@ build_native_modules() {
 
     if [ -n "${CODEX_NATIVE_MODULES_SOURCE:-}" ]; then
         install_native_modules_from_source "$app_extracted" "$CODEX_NATIVE_MODULES_SOURCE" "$bs3_build_ver" "$npty_ver"
+        stage_parcel_watcher_for_linux "$app_extracted" "$CODEX_NATIVE_MODULES_SOURCE"
         return 0
     fi
 
@@ -240,7 +309,6 @@ build_native_modules() {
         NPM_CONFIG_DISTURL="$ELECTRON_HEADERS_URL" \
         "${native_build_env[@]}" \
         node "$build_dir/node_modules/@electron/rebuild/lib/cli.js" -v "$ELECTRON_VERSION" --force --dist-url "$ELECTRON_HEADERS_URL" "${electron_rebuild_mode_args[@]}" >&2
-
     info "Native modules built successfully"
 
     # Copy compiled modules back into extracted app
@@ -250,6 +318,7 @@ build_native_modules() {
     cp -r "$build_dir/node_modules/node-pty" "$app_extracted/node_modules/"
     prune_native_module_build_artifacts "$app_extracted/node_modules/better-sqlite3"
     prune_native_module_build_artifacts "$app_extracted/node_modules/node-pty"
+    stage_parcel_watcher_for_linux "$app_extracted"
 }
 
 install_native_modules_from_source() {

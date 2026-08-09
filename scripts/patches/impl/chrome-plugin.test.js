@@ -157,12 +157,83 @@ function registerChromeRuntime(
   );
 }
 
-function isLexicallyWithin(root, candidate) {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return relative === "" || (
-    relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative)
+function removeChromeRegistryEntries(
+  patched,
+  entries,
+  {
+    codexHome,
+    nativeHostName = "com.openai.codexextension",
+    platform = "linux",
+    pluginCacheRoot = path.join(
+      codexHome,
+      "plugins",
+      "cache",
+      "openai-bundled",
+      "chrome",
+    ),
+  },
+) {
+  return vm.runInNewContext(
+    `${patched};Eq({codexHome:${JSON.stringify(codexHome)},entries:${JSON.stringify(entries)},nativeHostName:${JSON.stringify(nativeHostName)},pluginCacheRoot:${JSON.stringify(pluginCacheRoot)}});`,
+    {
+      process: { platform },
+      require,
+    },
+  );
+}
+
+function writeChromeNativeHostManifest(root, name, extensionHostPath) {
+  const manifestPath = path.join(root, `${name}.json`);
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  fs.writeFileSync(
+    manifestPath,
+    `${JSON.stringify({ path: extensionHostPath })}\n`,
+  );
+  return manifestPath;
+}
+
+function removeChromePluginManifests(
+  patched,
+  {
+    codexHome,
+    manifestPaths,
+    marketplaceName = "openai-bundled",
+    platform = "linux",
+    pluginName = "chrome",
+  },
+) {
+  return vm.runInNewContext(
+    `${patched};Sq({codexHome:${JSON.stringify(codexHome)},marketplaceName:${JSON.stringify(marketplaceName)},pluginName:${JSON.stringify(pluginName)}});`,
+    {
+      fixtureManifestPaths: manifestPaths,
+      process: { platform },
+      require,
+    },
+  );
+}
+
+function discoverChromePluginManifests(
+  patched,
+  {
+    codexHome,
+    manifestPaths,
+    platform = "linux",
+    pluginCacheRoot = path.join(
+      codexHome,
+      "plugins",
+      "cache",
+      "openai-bundled",
+      "chrome",
+    ),
+  },
+) {
+  return vm.runInNewContext(
+    `${patched};nJ({codexHome:${JSON.stringify(codexHome)},nativeHostName:"com.openai.codexextension",pluginCacheRoot:${JSON.stringify(pluginCacheRoot)}});`,
+    {
+      fixtureManifestPaths: manifestPaths,
+      process: { platform },
+      require,
+    },
   );
 }
 
@@ -187,6 +258,26 @@ test("patches the complete current Chrome runtime asset set transactionally", as
     );
     assert.match(srcPatched, /codexLinuxChromePluginAppServerSourcePath/);
     assert.match(srcPatched, /codexLinuxChromePluginRuntimeConfig/);
+    assert.match(
+      srcPatched,
+      /codexLinuxChromePluginRegistryEntryMatchesDurableRuntime/,
+    );
+    assert.match(
+      srcPatched,
+      /\/\*codexLinuxChromePluginManifestRemoval\*\/async function Sq/,
+    );
+    assert.match(
+      srcPatched,
+      /nJ\(\{codexHome:e\.codexHome,nativeHostName:t,pluginCacheRoot:r\}\)/,
+    );
+    assert.match(
+      srcPatched,
+      /rJ\(\{codexHome:e\.codexHome,manifestPath:t,pluginCacheRoot:e\.pluginCacheRoot\}\)/,
+    );
+    assert.match(
+      srcPatched,
+      /codexLinuxChromePluginPathMatchesDurableRuntime\(t\.data\.path,e,bJ\)/,
+    );
 
     const files = new Set([
       "/home/josh/.local/bin/codex",
@@ -235,35 +326,41 @@ test("patches the complete current Chrome runtime asset set transactionally", as
   }
 });
 
-test("registers the trusted Linux runtime cache instead of the installed cache", async () => {
+test("registers the durable trusted Linux runtime cache instead of the installed cache", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-runtime-trust-"));
   try {
     const fixture = createChromeRuntimeCaches(root);
     const patched = applyLinuxChromeNativeHostRuntimePatch(
       currentChromePluginAppServerSourceBundleFixture(),
     );
-    const bridgeRoot = path.join(fixture.installedRoot, ".codex-linux-runtime");
-    fs.symlinkSync(fixture.installedHost, bridgeRoot);
     const result = await registerChromeRuntime(patched, fixture);
 
-    const bridgeHost = path.join(
-      bridgeRoot,
+    const runtimeHost = path.join(
+      fixture.runtimeLatest,
       "extension-host",
       "linux",
       fixture.arch,
       "extension-host",
     );
-    assert.equal(result.extensionHostPath, bridgeHost);
+    const runtimeBrowserClient = path.join(
+      fixture.runtimeLatest,
+      "scripts",
+      "browser-client.mjs",
+    );
+    assert.equal(result.extensionHostPath, runtimeHost);
     assert.equal(
       result.browserClientPath,
-      path.join(bridgeRoot, "scripts", "browser-client.mjs"),
+      runtimeBrowserClient,
     );
-    assert.equal(fs.realpathSync(bridgeRoot), fixture.runtimeVersion);
     assert.equal(fs.statSync(fixture.installedRoot).mode & 0o022, 0);
+    assert.equal(
+      fs.existsSync(path.join(fixture.installedRoot, ".codex-linux-runtime")),
+      false,
+    );
     assert.deepEqual(
       {
-        dev: fs.statSync(bridgeHost).dev,
-        ino: fs.statSync(bridgeHost).ino,
+        dev: fs.statSync(runtimeHost).dev,
+        ino: fs.statSync(runtimeHost).ino,
       },
       {
         dev: fs.statSync(fixture.runtimeHost).dev,
@@ -276,12 +373,173 @@ test("registers the trusted Linux runtime cache instead of the installed cache",
     );
     assert.equal(fs.readFileSync(fixture.installedHost, "utf8"), "TAMPERED_INSTALLED_HOST\n");
     assert.equal(fs.readFileSync(fixture.runtimeHost, "utf8"), "TRUSTED_RUNTIME_HOST\n");
+
+    fs.rmSync(fixture.installedRoot, { recursive: true, force: true });
+    assert.equal(fs.readFileSync(result.extensionHostPath, "utf8"), "TRUSTED_RUNTIME_HOST\n");
+    assert.equal(fs.readFileSync(result.browserClientPath, "utf8"), "TRUSTED_BROWSER_CLIENT\n");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("keeps bridge registration removable with a symlinked CODEX_HOME", async () => {
+test("explicit removal deletes matching durable and managed-cache registry entries only", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-runtime-remove-"));
+  try {
+    const fixture = createChromeRuntimeCaches(root);
+    const patched = applyLinuxChromeNativeHostRuntimePatch(
+      currentChromePluginAppServerSourceBundleFixture(),
+    );
+    const registered = await registerChromeRuntime(patched, fixture);
+    const entries = [
+      {
+        id: "durable",
+        nativeHostNames: ["com.openai.codexextension"],
+        paths: { extensionHostPath: registered.extensionHostPath },
+      },
+      {
+        id: "managed-cache",
+        nativeHostNames: ["com.openai.codexextension"],
+        paths: { extensionHostPath: fixture.installedHost },
+      },
+      {
+        id: "unrelated-path",
+        nativeHostNames: ["com.openai.codexextension"],
+        paths: { extensionHostPath: path.join(root, "unrelated", "extension-host") },
+      },
+      {
+        id: "unrelated-host",
+        nativeHostNames: ["com.openai.codexextension.dev"],
+        paths: { extensionHostPath: registered.extensionHostPath },
+      },
+    ];
+
+    const remaining = removeChromeRegistryEntries(patched, entries, fixture);
+    assert.deepEqual(
+      Array.from(remaining, ({ id }) => id),
+      ["unrelated-path", "unrelated-host"],
+    );
+
+    const otherPluginRoot = path.join(
+      fixture.codexHome,
+      "plugins",
+      "cache",
+      "openai-bundled",
+      "other",
+    );
+    const crossPluginRemaining = removeChromeRegistryEntries(
+      patched,
+      entries,
+      { codexHome: fixture.codexHome, pluginCacheRoot: otherPluginRoot },
+    );
+    assert.deepEqual(
+      Array.from(crossPluginRemaining, ({ id }) => id),
+      entries.map(({ id }) => id),
+    );
+
+    const nonLinuxRemaining = removeChromeRegistryEntries(
+      patched,
+      entries,
+      { codexHome: fixture.codexHome, platform: "darwin" },
+    );
+    assert.deepEqual(
+      Array.from(nonLinuxRemaining, ({ id }) => id),
+      ["durable", "unrelated-path", "unrelated-host"],
+    );
+
+    const missingHome = path.join(root, "missing-home");
+    const missingHomeRemaining = removeChromeRegistryEntries(
+      patched,
+      [entries[0]],
+      { codexHome: missingHome },
+    );
+    assert.deepEqual(Array.from(missingHomeRemaining, ({ id }) => id), ["durable"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit removal deletes matching durable and managed native-messaging manifests only", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-manifest-remove-"));
+  try {
+    const fixture = createChromeRuntimeCaches(root);
+    const patched = applyLinuxChromeNativeHostRuntimePatch(
+      currentChromePluginAppServerSourceBundleFixture(),
+    );
+    const registered = await registerChromeRuntime(patched, fixture);
+    const manifestRoot = path.join(root, "native-messaging-hosts");
+    const durableManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "durable",
+      registered.extensionHostPath,
+    );
+    const managedManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "managed",
+      fixture.installedHost,
+    );
+    const unrelatedManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "unrelated",
+      path.join(root, "unrelated", "extension-host"),
+    );
+
+    await removeChromePluginManifests(patched, {
+      codexHome: fixture.codexHome,
+      manifestPaths: [durableManifest, managedManifest, unrelatedManifest],
+    });
+    assert.deepEqual(
+      [durableManifest, managedManifest, unrelatedManifest].map((manifestPath) =>
+        fs.existsSync(manifestPath)
+      ),
+      [false, false, true],
+    );
+
+    const nonLinuxDurableManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "non-linux-durable",
+      registered.extensionHostPath,
+    );
+    const nonLinuxManagedManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "non-linux-managed",
+      fixture.installedHost,
+    );
+    await removeChromePluginManifests(patched, {
+      codexHome: fixture.codexHome,
+      manifestPaths: [nonLinuxDurableManifest, nonLinuxManagedManifest],
+      platform: "darwin",
+    });
+    assert.deepEqual(
+      [nonLinuxDurableManifest, nonLinuxManagedManifest].map((manifestPath) =>
+        fs.existsSync(manifestPath)
+      ),
+      [true, false],
+    );
+
+    const crossPluginManifest = writeChromeNativeHostManifest(
+      manifestRoot,
+      "cross-plugin",
+      registered.extensionHostPath,
+    );
+    const crossPluginMatches = await discoverChromePluginManifests(patched, {
+      codexHome: fixture.codexHome,
+      manifestPaths: [crossPluginManifest],
+      pluginCacheRoot: path.join(
+        fixture.codexHome,
+        "plugins",
+        "cache",
+        "openai-bundled",
+        "other",
+      ),
+    });
+    assert.deepEqual(Array.from(crossPluginMatches), []);
+    assert.equal(fs.existsSync(crossPluginManifest), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps durable registration with a symlinked CODEX_HOME", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-runtime-home-link-"));
   try {
     const fixture = createChromeRuntimeCaches(root);
@@ -308,65 +566,52 @@ test("keeps bridge registration removable with a symlinked CODEX_HOME", async ()
       "chrome",
     );
 
-    assert.equal(isLexicallyWithin(pluginCacheRoot, result.extensionHostPath), true);
-    assert.equal(isLexicallyWithin(pluginCacheRoot, result.browserClientPath), true);
     assert.equal(
-      fs.realpathSync(path.join(pluginCacheRoot, ".codex-linux-runtime")),
-      fixture.runtimeVersion,
-    );
-
-    const unrelatedEntry = {
-      extensionHostPath: path.join(root, "unrelated", "extension-host"),
-    };
-    const remainingEntries = [result, unrelatedEntry].filter(
-      (entry) => !isLexicallyWithin(pluginCacheRoot, entry.extensionHostPath),
-    );
-    assert.deepEqual(remainingEntries, [unrelatedEntry]);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("preserves the existing bridge when atomic replacement fails", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-runtime-rename-"));
-  try {
-    const fixture = createChromeRuntimeCaches(root);
-    const bridgeRoot = path.join(fixture.installedRoot, ".codex-linux-runtime");
-    fs.symlinkSync(fixture.runtimeVersion, bridgeRoot, "dir");
-    const patched = applyLinuxChromeNativeHostRuntimePatch(
-      currentChromePluginAppServerSourceBundleFixture(),
-    );
-    const fsPromises = require("node:fs/promises");
-    const requireWithFailedRename = (specifier) => {
-      if (specifier !== "node:fs/promises") {
-        return require(specifier);
-      }
-      return {
-        ...fsPromises,
-        rename: async () => {
-          const error = new Error("injected bridge rename failure");
-          error.code = "EIO";
-          throw error;
-        },
-      };
-    };
-
-    await assert.rejects(
-      registerChromeRuntime(
-        patched,
-        fixture,
-        () => process.geteuid(),
+      result.extensionHostPath,
+      path.join(
+        fixture.runtimeLatest,
+        "extension-host",
+        "linux",
         fixture.arch,
-        requireWithFailedRename,
+        "extension-host",
       ),
-      /injected bridge rename failure/,
     );
-    assert.equal(fs.lstatSync(bridgeRoot).isSymbolicLink(), true);
-    assert.equal(fs.realpathSync(bridgeRoot), fixture.runtimeVersion);
-    assert.deepEqual(
-      fs.readdirSync(fixture.installedRoot).filter((name) => name.includes(".tmp-")),
-      [],
+    assert.equal(
+      result.browserClientPath,
+      path.join(fixture.runtimeLatest, "scripts", "browser-client.mjs"),
     );
+    fs.rmSync(pluginCacheRoot, { recursive: true, force: true });
+    assert.equal(fs.existsSync(result.extensionHostPath), true);
+    assert.equal(fs.existsSync(result.browserClientPath), true);
+
+    const remaining = removeChromeRegistryEntries(
+      patched,
+      [
+        {
+          id: "durable",
+          nativeHostNames: ["com.openai.codexextension"],
+          paths: { extensionHostPath: result.extensionHostPath },
+        },
+        {
+          id: "unrelated",
+          nativeHostNames: ["com.openai.codexextension"],
+          paths: { extensionHostPath: path.join(root, "unrelated", "extension-host") },
+        },
+      ],
+      { codexHome: lexicalCodexHome, pluginCacheRoot },
+    );
+    assert.deepEqual(Array.from(remaining, ({ id }) => id), ["unrelated"]);
+
+    const manifestPath = writeChromeNativeHostManifest(
+      path.join(root, "native-messaging-hosts"),
+      "symlinked-home",
+      result.extensionHostPath,
+    );
+    await removeChromePluginManifests(patched, {
+      codexHome: lexicalCodexHome,
+      manifestPaths: [manifestPath],
+    });
+    assert.equal(fs.existsSync(manifestPath), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -515,6 +760,14 @@ test("rejects current Chrome runtime markers with a damaged contract body", () =
       ),
       patchedSource.replace(
         "??codexLinuxChromeNativeHostRuntimeFile(e.resourcesPath,[[process.platform===`win32`?`node_repl.exe`:`node_repl`]])",
+        "",
+      ),
+      patchedSource.replace(
+        "||codexLinuxChromePluginRegistryEntryMatchesDurableRuntime(n,t,bJ)",
+        "",
+      ),
+      patchedSource.replace(
+        "||codexLinuxChromePluginPathMatchesDurableRuntime(t.data.path,e,bJ)",
         "",
       ),
     ];

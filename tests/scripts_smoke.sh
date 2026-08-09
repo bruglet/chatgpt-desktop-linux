@@ -6997,7 +6997,7 @@ functions = [source[
     source.index("codex_restore_original_ld_library_path() {"):
     source.index("# Capture before package-specific launcher patches")
 ]]
-for name in ("cached_codex_cli_path", "find_fnm_codex_cli", "find_codex_cli", "verify_cli_launch_path", "pid_parent_matches", "codex_cli_version_probe", "codex_cli_version", "codex_cli_missing_optional_dependency", "log_codex_cli_path"):
+for name in ("cached_codex_cli_path", "find_fnm_codex_cli", "find_mise_codex_cli", "is_codex_cli_path", "find_codex_cli", "verify_cli_launch_path", "pid_parent_matches", "codex_cli_version_probe", "codex_cli_version", "codex_cli_missing_optional_dependency", "log_codex_cli_path"):
     match = re.search(r"^" + re.escape(name) + r"\(\) \{[\s\S]*?^\}\n", source, re.M)
     if match is None:
         raise SystemExit(f"missing {name}")
@@ -7011,7 +7011,9 @@ pathlib.Path(sys.argv[2]).write_text(
     + r'''
 case "${1:?}" in
     find)
-        find_codex_cli
+        # 容忍查找失败：CLI 可能不存在（如仅 mise shim 无真实安装），
+        # 此时应输出空并返回 0，供上层断言"未选中 mise shim"。
+        find_codex_cli || true
         ;;
     version)
         codex_cli_version "$2"
@@ -7115,6 +7117,28 @@ PY
     selected_cli="$(env -i PATH="$path_cli_bin:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
     [ "$selected_cli" = "$path_cli_bin/codex" ] || fail "CLI lookup must keep the first PATH hit, got $selected_cli"
 
+    local mise_shim_dir="$workspace/mise-shims"
+    local mise_bin_dir="$workspace/mise-bin"
+    local mise_data_dir="$workspace/mise-data"
+    local mise_installed="$mise_data_dir/mise/installs/npm-openai-codex/9.99.0/bin/codex"
+    mkdir -p "$mise_shim_dir" "$mise_bin_dir" "$(dirname "$mise_installed")"
+    printf '#!/usr/bin/env bash\nprintf "codex-cli 9.99.0\\n"\n' > "$mise_installed"
+    chmod +x "$mise_installed"
+    # mise shim: symlink named codex pointing at the mise binary
+    printf '#!/usr/bin/env bash\nprintf "mise 2026.8.3\\n"\n' > "$mise_bin_dir/mise"
+    chmod +x "$mise_bin_dir/mise"
+    ln -s "$mise_bin_dir/mise" "$mise_shim_dir/codex"
+    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$fake_home" XDG_DATA_HOME="$mise_data_dir" "$launcher_probe" find)"
+    [ "$selected_cli" = "$mise_installed" ] || \
+        fail "CLI lookup must resolve mise-installed codex through the mise shim, got $selected_cli"
+
+    # no mise install dir present: fall back to nothing rather than the mise binary
+    local empty_home="$workspace/empty-mise-home"
+    mkdir -p "$empty_home"
+    chmod 0755 "$empty_home"
+    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$empty_home" "$launcher_probe" find)"
+    [ -z "$selected_cli" ] || fail "CLI lookup must never select the mise shim binary, got $selected_cli"
+
     local brew_home="$workspace/brew-home"
     mkdir -p "$brew_home/.linuxbrew/bin"
     printf '#!/usr/bin/env bash\nprintf "codex-cli 0.160.0\\n"\n' > "$brew_home/.linuxbrew/bin/codex"
@@ -7145,6 +7169,16 @@ PY
     ln -s "$external_cli" "$visible_cli"
     resolved_cli="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" resolve "$visible_cli")"
     [ "$resolved_cli" = "$(realpath "$external_cli")" ] || fail "CLI resolver must canonicalize visible symlinks, got $resolved_cli"
+
+    local alt_name_bin="$workspace/alt-name-bin"
+    local alt_name_target="$workspace/alt-name-target/openai-codex-bin"
+    mkdir -p "$alt_name_bin" "$(dirname "$alt_name_target")"
+    printf '#!/usr/bin/env bash\nprintf "codex-cli 0.173.0\\n"\n' > "$alt_name_target"
+    chmod 0755 "$alt_name_target" "$(dirname "$alt_name_target")"
+    ln -s "$alt_name_target" "$alt_name_bin/codex"
+    selected_cli="$(env -i PATH="$alt_name_bin:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
+    [ "$selected_cli" = "$alt_name_bin/codex" ] || \
+        fail "CLI lookup must accept a codex symlink to an executable with another basename, got $selected_cli"
 
     local custom_brew_prefix="$workspace/custom-homebrew"
     local custom_brew_target_dir="$workspace/custom-homebrew-cellar/openai-codex/0.42.0/bin"

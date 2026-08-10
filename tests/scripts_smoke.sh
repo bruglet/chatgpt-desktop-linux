@@ -5925,8 +5925,13 @@ if 'CODEX_LINUX_INSTANCE_ID=$CODEX_LINUX_INSTANCE_ID' not in instance_match_body
     raise SystemExit("pid_in_same_launch_instance must match instance identity from the process environment")
 if not re.search(r'log_phase "initial_launch_state_refresh_start"\s+refresh_launch_state\s+log_phase "initial_launch_state_refreshed"\s+trap cleanup_launcher EXIT', source):
     raise SystemExit("launcher must do an initial runtime-state refresh before warm-start IPC")
-if "trap 'exit 130' INT" not in source or "trap 'exit 143' TERM" not in source or "trap 'exit 129' HUP" not in source:
-    raise SystemExit("launcher must cleanup through EXIT after INT/TERM/HUP")
+if "trap 'handle_launcher_signal INT 130' INT" not in source or "trap 'handle_launcher_signal TERM 0' TERM" not in source or "trap 'handle_launcher_signal HUP 129' HUP" not in source:
+    raise SystemExit("launcher must cleanup through EXIT and treat planned TERM as success")
+signal_body = source.split("handle_launcher_signal() {", 1)[1].split("launcher_lock_wait_seconds() {", 1)[0]
+if 'kill -s "$signal_name" "$ELECTRON_PID"' not in signal_body:
+    raise SystemExit("launcher signal handling must forward the signal to Electron")
+if 'exit "$exit_status"' not in signal_body:
+    raise SystemExit("launcher signal handling must use the signal-specific service status")
 prepare_body = source.split("prepare_launch_state_under_lock() {", 1)[1].split("launch_electron() {", 1)[0]
 if "acquire_launcher_lock" not in prepare_body or "refresh_launch_state_quick" not in prepare_body:
     raise SystemExit("launcher must refresh launch state under the launcher lock before cold-start work")
@@ -11163,6 +11168,7 @@ EOF
 
 test_launcher_warm_start_recovery() {
     info "Checking warm-start recovery after launcher SIGKILL"
+    CODEX_TEST_TERM_STATUS=1 bash "$REPO_DIR/tests/launcher_warm_start_recovery.sh"
     bash "$REPO_DIR/tests/launcher_warm_start_recovery.sh"
     CODEX_TEST_APPIMAGE_REMOUNT=1 bash "$REPO_DIR/tests/launcher_warm_start_recovery.sh"
     CODEX_TEST_DISABLE_WARM_START=1 bash "$REPO_DIR/tests/launcher_warm_start_recovery.sh"

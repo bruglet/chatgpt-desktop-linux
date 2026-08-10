@@ -4194,6 +4194,22 @@ PY
     assert_not_contains "$fixture/calls.log" "nix build"
 }
 
+test_watchbound_nix_pin_and_output_guards() {
+    info "Checking Watchbound Nix pins and feature output stay CI-guarded"
+    local manifest_path="linux-features/directory-only-working-tree-watch/watchbound-artifacts.json"
+    local cargo_lock_path="nix/watchbound-Cargo.lock"
+
+    assert_contains "$REPO_DIR/.github/workflows/ci.yml" "linux-features/directory-only-working-tree-watch/watchbound-artifacts"
+    assert_contains "$REPO_DIR/.github/workflows/ci.yml" "nix/watchbound-Cargo"
+    assert_contains "$REPO_DIR/scripts/ci/update-nix-hashes.sh" "$manifest_path"
+    assert_contains "$REPO_DIR/scripts/ci/update-nix-hashes.sh" "$cargo_lock_path"
+    assert_contains "$REPO_DIR/scripts/ci/update-nix-hashes.sh" ".#checks.x86_64-linux.watchdog-linux-features"
+    assert_contains "$REPO_DIR/.github/workflows/update-codex-hash.yml" "$manifest_path"
+    assert_contains "$REPO_DIR/.github/workflows/update-codex-hash.yml" "$cargo_lock_path"
+    assert_contains "$REPO_DIR/flake.nix" "--verify-controlled-package-root"
+    assert_not_contains "$REPO_DIR/flake.nix" "CODEX_ELECTRON_PROBE"
+}
+
 test_ci_local_mounts_shared_git_metadata_for_linked_worktrees() {
     info "Checking ci-local supports linked Git worktrees"
     assert_contains "$REPO_DIR/scripts/ci-local.sh" 'rev-parse --path-format=absolute --git-common-dir'
@@ -11383,6 +11399,7 @@ main() {
     test_update_nix_hashes_verifies_changed_dmg_hash
     test_update_nix_hashes_supports_focused_verification_output
     test_update_nix_hashes_skips_output_build_when_refresh_ref_already_matches
+    test_watchbound_nix_pin_and_output_guards
     test_ci_local_mounts_shared_git_metadata_for_linked_worktrees
     test_installer_detects_electron_version_from_plist
     test_installer_keeps_electron_fallback_for_bad_metadata

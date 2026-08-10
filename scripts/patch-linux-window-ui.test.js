@@ -193,6 +193,7 @@ const {
   applyLinuxOpaqueWindowsDefaultPatch,
   applyLinuxSettingsSearchVisibilityPatch,
   applyLinuxAppShellTabLayoutPerformancePatch,
+  applyLinuxMarkdownAnimationPerformancePatch,
   applyLinuxSidebarScrollPerformancePatch,
   applyLinuxSkillsListDedupePatch,
   applyLinuxThreadSidePanelNativeTooltipPatch,
@@ -201,6 +202,7 @@ const {
   applySubagentNicknameMetadataPatch,
   codexLinuxWatchBrowserWebviewAttachment,
   matchesLinuxAppShellTabLayoutPerformanceContract,
+  matchesLinuxMarkdownAnimationPerformanceContract,
   matchesLinuxSidebarScrollPerformanceContract,
 } = require("./patches/impl/webview/index.js");
 const {
@@ -1040,6 +1042,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-settings-search-visibility",
     "linux-sidebar-scroll-performance",
     "linux-app-shell-tab-layout-performance",
+    "linux-markdown-animation-performance",
     "linux-i18n-gate",
     "automation-schedule-multi-time-rrule",
     "automation-update-eager-tool",
@@ -1155,6 +1158,26 @@ test("default core patch descriptors are grouped and unique", () => {
   assert.equal(sidebarScrollPerformance?.pattern.test("app-DuLjgNkx.css"), false);
   assert.equal(sidebarScrollPerformance?.assetMatch(sidebarScrollFixture()), true);
   assert.equal(sidebarScrollPerformance?.assetMatch("function unrelated(){}"), false);
+  const markdownAnimationPerformance = descriptors.find(
+    (descriptor) => descriptor.id === "linux-markdown-animation-performance",
+  );
+  assert.equal(markdownAnimationPerformance?.ciPolicy, "optional");
+  assert.equal(
+    markdownAnimationPerformance?.pattern.test("app-initial-AYgnwUwc.css"),
+    true,
+  );
+  assert.equal(
+    markdownAnimationPerformance?.pattern.test("app-initial-Biw83Aiz.js"),
+    false,
+  );
+  assert.equal(
+    markdownAnimationPerformance?.assetMatch(markdownAnimationFixture()),
+    true,
+  );
+  assert.equal(
+    markdownAnimationPerformance?.assetMatch("._MarkdownRoot_other{}"),
+    false,
+  );
   assert.equal(
     descriptors.find((descriptor) => descriptor.id === "linux-computer-use-avatar-cursor")?.ciPolicy,
     "optional",
@@ -3739,6 +3762,78 @@ test("leaves ambiguous app-shell tab animation assets byte-identical", () => {
   assert.equal(value, source);
   assert.deepEqual(warnings, [
     "WARN: Could not uniquely identify the app-shell tab layout contract — skipping Linux tab layout performance patch",
+  ]);
+});
+
+function markdownAnimationFixture() {
+  return [
+    "._MarkdownRoot_y8xrz_132[data-markdown-animated] :is(._FadeIn_y8xrz_535,hr,li,tr,blockquote){opacity:0;animation:_fade-in_y8xrz_1 var(--duration,var(--transition-duration-basic)) var(--fade-easing,cubic-bezier(.37, .55, .86, .88)) forwards;animation-delay:var(--fade-delay,0s)}",
+    "._MarkdownRoot_y8xrz_132[data-markdown-animated] ._FadeListDecoration_y8xrz_542::marker{animation:_fade-in-marker_y8xrz_1 var(--duration,var(--transition-duration-basic)) var(--fade-easing,cubic-bezier(.37, .55, .86, .88)) forwards;animation-delay:var(--fade-delay,0s)}",
+    "._MarkdownRoot_y8xrz_132[data-markdown-animated] ._ImageEnter_y8xrz_548{transform-origin:50%;animation:.18s ease-out both _image-enter_y8xrz_1}",
+  ].join("");
+}
+
+test("renders streaming Markdown text immediately while preserving image enter motion", () => {
+  assert.equal(typeof applyLinuxMarkdownAnimationPerformancePatch, "function");
+  const source = markdownAnimationFixture();
+
+  const patched = applyPatchTwice(
+    applyLinuxMarkdownAnimationPerformancePatch,
+    source,
+  );
+
+  assert.equal(
+    patched,
+    "._MarkdownRoot_y8xrz_132[data-markdown-animated] :is(._FadeIn_y8xrz_535,hr,li,tr,blockquote){opacity:1;animation:none}" +
+      "._MarkdownRoot_y8xrz_132[data-markdown-animated] ._FadeListDecoration_y8xrz_542::marker{animation:none}" +
+      "._MarkdownRoot_y8xrz_132[data-markdown-animated] ._ImageEnter_y8xrz_548{transform-origin:50%;animation:.18s ease-out both _image-enter_y8xrz_1}",
+  );
+  assert.equal(matchesLinuxMarkdownAnimationPerformanceContract(patched), true);
+});
+
+test("matches only one complete streaming Markdown animation contract", () => {
+  const generic =
+    ".generic[data-markdown-animated] ._FadeIn_other_1{opacity:0;animation:fade 1s}";
+
+  assert.equal(
+    matchesLinuxMarkdownAnimationPerformanceContract(markdownAnimationFixture()),
+    true,
+  );
+  assert.equal(matchesLinuxMarkdownAnimationPerformanceContract(generic), false);
+  assert.equal(
+    matchesLinuxMarkdownAnimationPerformanceContract(
+      markdownAnimationFixture() + markdownAnimationFixture(),
+    ),
+    false,
+  );
+});
+
+test("leaves drifted streaming Markdown animation styles byte-identical", () => {
+  const source = markdownAnimationFixture().replace(
+    "animation-delay:var(--fade-delay,0s)",
+    "animation-delay:var(--upstream-delay,0s)",
+  );
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxMarkdownAnimationPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the streaming Markdown animation contract — skipping Linux Markdown animation performance patch",
+  ]);
+});
+
+test("leaves ambiguous streaming Markdown animation styles byte-identical", () => {
+  const source = markdownAnimationFixture() + markdownAnimationFixture();
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxMarkdownAnimationPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the streaming Markdown animation contract — skipping Linux Markdown animation performance patch",
   ]);
 });
 

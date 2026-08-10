@@ -192,6 +192,7 @@ const {
   applyLinuxI18nGatePatch,
   applyLinuxOpaqueWindowsDefaultPatch,
   applyLinuxSettingsSearchVisibilityPatch,
+  applyLinuxAppShellTabLayoutPerformancePatch,
   applyLinuxSidebarScrollPerformancePatch,
   applyLinuxSkillsListDedupePatch,
   applyLinuxThreadSidePanelNativeTooltipPatch,
@@ -199,6 +200,7 @@ const {
   applyLinuxWindowControlsSafeAreaPatch,
   applySubagentNicknameMetadataPatch,
   codexLinuxWatchBrowserWebviewAttachment,
+  matchesLinuxAppShellTabLayoutPerformanceContract,
   matchesLinuxSidebarScrollPerformanceContract,
 } = require("./patches/impl/webview/index.js");
 const {
@@ -1037,6 +1039,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-workspace-root-open-targets",
     "linux-settings-search-visibility",
     "linux-sidebar-scroll-performance",
+    "linux-app-shell-tab-layout-performance",
     "linux-i18n-gate",
     "automation-schedule-multi-time-rrule",
     "automation-update-eager-tool",
@@ -3615,6 +3618,127 @@ test("rejects an incomplete sidebar performance patch marker", () => {
   assert.equal(value, source);
   assert.deepEqual(warnings, [
     "WARN: Found incomplete Linux sidebar scroll performance patch — skipping",
+  ]);
+});
+
+function appShellTabMountAnimationFixture({
+  duplicate = false,
+  initialExpression = "p?PCr:!1",
+} = {}) {
+  const tab =
+    "function ECr(e){let [N,P]=useState(!1),z=(e,t)=>{P(t.scrollWidth>t.clientWidth)};return jsx(`span`,{\"data-app-shell-tab-close-button\":!0,className:`@max-[4rem]/app-shell-tab:invisible`})}function kCr(e){let p=!Zm()&&u?.dragState==null;let R=" +
+    initialExpression +
+    ",z=p?PCr:void 0,B;return (0,eM.jsxs)(rp.div,{inert:F,\"data-app-shell-tab-controller\":I,\"data-tab-id\":m,ref:L,initial:R,animate:FCr,exit:z,transition:wCr,onAnimationComplete:B,className:`@container/app-shell-tab contain-content`,style:ee,children:[se,ue]})}";
+  const presets =
+    "var PCr={maxWidth:`0px`,minWidth:`0px`},FCr={maxWidth:`160px`,minWidth:`90px`};";
+  const source = `${tab}${presets}`;
+  return duplicate ? `${source}${source.replaceAll("kCr", "kDr")}` : source;
+}
+
+test("skips app-shell tab enter animation while preserving exit animation", () => {
+  const source = appShellTabMountAnimationFixture();
+
+  const patched = applyPatchTwice(
+    applyLinuxAppShellTabLayoutPerformancePatch,
+    source,
+  );
+
+  assert.match(patched, /let p=!Zm\(\)&&u\?\.dragState==null;let R=!1,z=p\?PCr:void 0,B/);
+  assert.match(
+    patched,
+    /initial:R,animate:FCr,exit:z,transition:wCr,onAnimationComplete:B/,
+  );
+  assert.match(
+    patched,
+    /z=\(e,t\)=>\{codexLinuxScheduleAppShellTabOverflow\(t,P\)\}/,
+  );
+  assert.match(
+    patched,
+    /function codexLinuxScheduleAppShellTabOverflow\(e,t\)/,
+  );
+  assert.match(patched, /PCr=\{maxWidth:`0px`,minWidth:`0px`\}/);
+  assert.equal(matchesLinuxAppShellTabLayoutPerformanceContract(patched), true);
+});
+
+test("coalesces app-shell tab overflow reads and ignores disconnected labels", () => {
+  const patched = applyLinuxAppShellTabLayoutPerformancePatch(
+    appShellTabMountAnimationFixture(),
+  );
+  const helper = patched.slice(
+    patched.indexOf("const codexLinuxAppShellTabOverflowFrames="),
+    patched.indexOf("function ECr("),
+  );
+  const frames = [];
+  const schedule = new Function(
+    "requestAnimationFrame",
+    `${helper};return codexLinuxScheduleAppShellTabOverflow`,
+  )((callback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  const label = { clientWidth: 80, isConnected: true, scrollWidth: 120 };
+  const states = [];
+
+  schedule(label, (overflow) => states.push(overflow));
+  schedule(label, (overflow) => states.push(overflow));
+  assert.equal(frames.length, 1);
+  assert.deepEqual(states, []);
+
+  frames.shift()();
+  assert.deepEqual(states, [true]);
+
+  schedule(label, (overflow) => states.push(overflow));
+  label.isConnected = false;
+  frames.shift()();
+  assert.deepEqual(states, [true]);
+});
+
+test("matches only the app-shell width-animation contract", () => {
+  assert.equal(
+    matchesLinuxAppShellTabLayoutPerformanceContract(
+      appShellTabMountAnimationFixture(),
+    ),
+    true,
+  );
+  assert.equal(
+    matchesLinuxAppShellTabLayoutPerformanceContract(
+      "function generic(){let R=p?PCr:!1,z=p?PCr:void 0;return jsx(motion.div,{initial:R,animate:FCr,exit:z})}",
+    ),
+    false,
+  );
+  assert.equal(
+    matchesLinuxAppShellTabLayoutPerformanceContract(
+      appShellTabMountAnimationFixture({ duplicate: true }),
+    ),
+    false,
+  );
+});
+
+test("leaves drifted app-shell tab animation byte-identical", () => {
+  const source = appShellTabMountAnimationFixture({
+    initialExpression: "getInitialTabWidth(p)",
+  });
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxAppShellTabLayoutPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the app-shell tab layout contract — skipping Linux tab layout performance patch",
+  ]);
+});
+
+test("leaves ambiguous app-shell tab animation assets byte-identical", () => {
+  const source = appShellTabMountAnimationFixture({ duplicate: true });
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxAppShellTabLayoutPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the app-shell tab layout contract — skipping Linux tab layout performance patch",
   ]);
 });
 

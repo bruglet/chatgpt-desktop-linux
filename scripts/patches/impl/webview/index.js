@@ -35,8 +35,71 @@ const LINUX_SIDEBAR_SCROLL_DRIFT_WARNING =
   "WARN: Could not uniquely identify the main sidebar scroll container — skipping Linux sidebar scroll performance patch";
 const LINUX_APP_SHELL_TAB_LAYOUT_DRIFT_WARNING =
   "WARN: Could not uniquely identify the app-shell tab layout contract — skipping Linux tab layout performance patch";
+const LINUX_MARKDOWN_ANIMATION_DRIFT_WARNING =
+  "WARN: Could not uniquely identify the streaming Markdown animation contract — skipping Linux Markdown animation performance patch";
 const LINUX_APP_SHELL_TAB_OVERFLOW_HELPER =
   "const codexLinuxAppShellTabOverflowFrames=new WeakMap;function codexLinuxScheduleAppShellTabOverflow(e,t){if(e?.isConnected&&!codexLinuxAppShellTabOverflowFrames.has(e)){let n=requestAnimationFrame(()=>{codexLinuxAppShellTabOverflowFrames.delete(e),e.isConnected&&t(e.scrollWidth>e.clientWidth)});codexLinuxAppShellTabOverflowFrames.set(e,n)}}";
+
+// Restoring a running thread replays the per-word fade for every incomplete
+// Markdown item in its active turn. Large agent timelines can create more than
+// a thousand animations at once, forcing expensive layerization even for text
+// above the viewport. Text still streams normally when rendered immediately;
+// retain the separate image-enter transition because it is bounded per image.
+function linuxMarkdownAnimationRules(currentSource) {
+  const unpatchedPattern =
+    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,hr,li,tr,blockquote\))\{opacity:0;animation:_fade-in_\2_1 ([^{}]+);animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:_fade-in-marker_\2_1 \3;animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._ImageEnter_\2_\d+\{transform-origin:50%;animation:\.18s ease-out both _image-enter_\2_1\})/gu;
+  const patchedPattern =
+    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,hr,li,tr,blockquote\))\{opacity:1;animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._ImageEnter_\2_\d+\{transform-origin:50%;animation:\.18s ease-out both _image-enter_\2_1\})/gu;
+  const candidates = [];
+
+  for (const match of currentSource.matchAll(unpatchedPattern)) {
+    candidates.push({
+      end: match.index + match[0].length,
+      patched: false,
+      replacement:
+        `${match[1]}{opacity:1;animation:none}` +
+        `${match[4]}{animation:none}` +
+        match[5],
+      start: match.index,
+    });
+  }
+  for (const match of currentSource.matchAll(patchedPattern)) {
+    candidates.push({
+      end: match.index + match[0].length,
+      patched: true,
+      replacement: match[0],
+      start: match.index,
+    });
+  }
+  return candidates;
+}
+
+function matchesLinuxMarkdownAnimationPerformanceContract(currentSource) {
+  return linuxMarkdownAnimationRules(currentSource).length === 1;
+}
+
+function applyLinuxMarkdownAnimationPerformancePatch(currentSource) {
+  const candidates = linuxMarkdownAnimationRules(currentSource);
+  if (candidates.length === 1) {
+    const [candidate] = candidates;
+    if (candidate.patched) {
+      return currentSource;
+    }
+    return (
+      currentSource.slice(0, candidate.start) +
+      candidate.replacement +
+      currentSource.slice(candidate.end)
+    );
+  }
+
+  if (
+    currentSource.includes("data-markdown-animated") &&
+    currentSource.includes("_FadeListDecoration_")
+  ) {
+    console.warn(LINUX_MARKDOWN_ANIMATION_DRIFT_WARNING);
+  }
+  return currentSource;
+}
 
 function enclosingFunction(currentSource, targetIndex) {
   const functionPattern =
@@ -2759,6 +2822,7 @@ module.exports = {
   applyLinuxAppSunsetPatch,
   applyLinuxOpaqueWindowsDefaultPatch,
   applyLinuxAppShellTabLayoutPerformancePatch,
+  applyLinuxMarkdownAnimationPerformancePatch,
   applyLinuxThreadSidePanelNativeTooltipPatch,
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
@@ -2770,6 +2834,7 @@ module.exports = {
   applySubagentNicknameMetadataPatch,
   codexLinuxWatchBrowserWebviewAttachment,
   matchesLinuxAppShellTabLayoutPerformanceContract,
+  matchesLinuxMarkdownAnimationPerformanceContract,
   matchesLinuxSidebarScrollPerformanceContract,
   patchBrowserPagePreloadBundle,
 };

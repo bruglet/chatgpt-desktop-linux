@@ -25,6 +25,99 @@ const LINUX_WINDOW_CONTROLS_SAFE_AREA_MARKER =
   "/*codexLinuxWindowControlsSafeAreaPatch*/";
 const LINUX_WINDOW_CONTROLS_SAFE_AREA_PATCH_ID =
   "linux-window-controls-safe-area";
+// Chromium on Linux invalidates the full sidebar subtree when the fade custom
+// properties are driven by animation-timeline: scroll(self y).
+// Keep the existing header mask and footer fade, but make this one container's
+// footer distance static so scrolling can stay on the compositor path.
+const LINUX_SIDEBAR_SCROLL_STYLE =
+  "{animationName:`none`,animationTimeline:`auto`,\"--bottom-fade\":`calc(var(--spacing) * 10)`}";
+const LINUX_SIDEBAR_SCROLL_DRIFT_WARNING =
+  "WARN: Could not uniquely identify the main sidebar scroll container — skipping Linux sidebar scroll performance patch";
+
+function linuxSidebarScrollContainers(currentSource) {
+  const anchorPattern =
+    /\{\.\.\.[A-Za-z_$][\w$]*\.sidebarScroll,className:/gu;
+  const containers = [];
+  for (const anchor of currentSource.matchAll(anchorPattern)) {
+    const tail = currentSource.slice(anchor.index, anchor.index + 4_000);
+    const propsMatch = tail.match(
+      /\)(?:,style:(\{[^{}]*\}))?,ref:[A-Za-z_$][\w$]*,onScroll:[A-Za-z_$][\w$]*=>\{/u,
+    );
+    if (propsMatch?.index == null) {
+      continue;
+    }
+
+    const classNameSource = tail.slice(0, propsMatch.index + 1);
+    if (
+      !classNameSource.includes("vertical-scroll-fade-mask") ||
+      !classNameSource.includes("[contain:layout_paint]") ||
+      !classNameSource.includes(".headerFadeMask")
+    ) {
+      continue;
+    }
+
+    const handlerOpenBrace =
+      anchor.index + propsMatch.index + propsMatch[0].lastIndexOf("{");
+    const handlerCloseBrace = findMatchingBrace(currentSource, handlerOpenBrace);
+    if (handlerCloseBrace === -1) {
+      continue;
+    }
+    const handlerSource = currentSource.slice(
+      handlerOpenBrace,
+      handlerCloseBrace + 1,
+    );
+    if (
+      !/let\{scrollTop:[A-Za-z_$][\w$]*\}=[A-Za-z_$][\w$]*\.currentTarget/u.test(
+        handlerSource,
+      )
+    ) {
+      continue;
+    }
+
+    const style = propsMatch[1] ?? null;
+    containers.push({
+      classNameEnd: anchor.index + propsMatch.index + 1,
+      style,
+      styleComplete: style == null || style === LINUX_SIDEBAR_SCROLL_STYLE,
+    });
+  }
+  return containers;
+}
+
+function matchesLinuxSidebarScrollPerformanceContract(currentSource) {
+  const containers = linuxSidebarScrollContainers(currentSource);
+  return containers.length === 1 && containers[0].styleComplete;
+}
+
+function applyLinuxSidebarScrollPerformancePatch(currentSource) {
+  const containers = linuxSidebarScrollContainers(currentSource);
+  if (containers.length === 1 && containers[0].styleComplete) {
+    const [container] = containers;
+    if (container.style === LINUX_SIDEBAR_SCROLL_STYLE) {
+      return currentSource;
+    }
+    return (
+      currentSource.slice(0, container.classNameEnd) +
+      `,style:${LINUX_SIDEBAR_SCROLL_STYLE}` +
+      currentSource.slice(container.classNameEnd)
+    );
+  }
+
+  if (containers.some((container) => !container.styleComplete)) {
+    console.warn(
+      "WARN: Found incomplete Linux sidebar scroll performance patch — skipping",
+    );
+    return currentSource;
+  }
+  if (
+    currentSource.includes(".sidebarScroll") &&
+    currentSource.includes("vertical-scroll-fade-mask") &&
+    currentSource.includes("[contain:layout_paint]")
+  ) {
+    console.warn(LINUX_SIDEBAR_SCROLL_DRIFT_WARNING);
+  }
+  return currentSource;
+}
 
 function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
   if (currentSource.includes("function codexLinuxFilterSettingsSearchSection(")) {
@@ -2498,10 +2591,12 @@ module.exports = {
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
   applyLinuxSettingsSearchVisibilityPatch,
+  applyLinuxSidebarScrollPerformancePatch,
   applyLinuxFastModeModelGuardPatch,
   applyLinuxSkillsListDedupePatch,
   applyLocalEnvironmentActionModalDraftPatch,
   applySubagentNicknameMetadataPatch,
   codexLinuxWatchBrowserWebviewAttachment,
+  matchesLinuxSidebarScrollPerformanceContract,
   patchBrowserPagePreloadBundle,
 };

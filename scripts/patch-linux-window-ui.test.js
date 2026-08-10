@@ -192,12 +192,14 @@ const {
   applyLinuxI18nGatePatch,
   applyLinuxOpaqueWindowsDefaultPatch,
   applyLinuxSettingsSearchVisibilityPatch,
+  applyLinuxSidebarScrollPerformancePatch,
   applyLinuxSkillsListDedupePatch,
   applyLinuxThreadSidePanelNativeTooltipPatch,
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
   applySubagentNicknameMetadataPatch,
   codexLinuxWatchBrowserWebviewAttachment,
+  matchesLinuxSidebarScrollPerformanceContract,
 } = require("./patches/impl/webview/index.js");
 const {
   findCodexRequestWebviewAsset,
@@ -1034,6 +1036,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-projectless-xdg-documents-dir",
     "linux-workspace-root-open-targets",
     "linux-settings-search-visibility",
+    "linux-sidebar-scroll-performance",
     "linux-i18n-gate",
     "automation-schedule-multi-time-rrule",
     "automation-update-eager-tool",
@@ -1141,6 +1144,14 @@ test("default core patch descriptors are grouped and unique", () => {
     descriptors.find((descriptor) => descriptor.id === "linux-terminal-user-path")?.ciPolicy,
     "optional",
   );
+  const sidebarScrollPerformance = descriptors.find(
+    (descriptor) => descriptor.id === "linux-sidebar-scroll-performance",
+  );
+  assert.equal(sidebarScrollPerformance?.ciPolicy, "optional");
+  assert.equal(sidebarScrollPerformance?.pattern.test("app-initial-Biw83Aiz.js"), true);
+  assert.equal(sidebarScrollPerformance?.pattern.test("app-DuLjgNkx.css"), false);
+  assert.equal(sidebarScrollPerformance?.assetMatch(sidebarScrollFixture()), true);
+  assert.equal(sidebarScrollPerformance?.assetMatch("function unrelated(){}"), false);
   assert.equal(
     descriptors.find((descriptor) => descriptor.id === "linux-computer-use-avatar-cursor")?.ciPolicy,
     "optional",
@@ -3515,6 +3526,96 @@ test("keeps tooltip collision padding after middleware alias drift", () => {
 
   assert.match(patched, /o\(\{mainAxis:ne,crossAxis:t\}\),l\(\{padding:\{top:44,right:8,bottom:8,left:8\}\}\),u\(\{padding:\{top:44,right:8,bottom:8,left:8\}\}\),d\(\{padding:\{top:44,right:8,bottom:8,left:8\},apply/);
   assert.doesNotMatch(patched, /[,(]\{padding:8\}/);
+});
+
+function sidebarScrollFixture({ handler = null, duplicate = false } = {}) {
+  const scrollHandler = handler ??
+    "e=>{let t=D.current;(t==null||e.timeStamp-t>=CKc)&&(Fh(),D.current=e.timeStamp);let{scrollTop:n}=e.currentTarget;C||(u?.(n>0),r(n))}";
+  const container =
+    "(0,SKc.jsxs)(`div`,{...cm.sidebarScroll,className:$(`vertical-scroll-fade-mask relative isolate flex min-h-0 flex-1 flex-col overflow-y-auto [contain:layout_paint]`,_Kc.headerFadeMask),ref:p,onScroll:" +
+    scrollHandler +
+    ",children:[h,m]})";
+  const source = `function yKc(e){return ${container}}`;
+  return duplicate ? `${source}${source}` : source;
+}
+
+test("disables only the main sidebar scroll-driven fade timeline", () => {
+  const source = `${sidebarScrollFixture()}function unrelated(){return\`vertical-scroll-fade-mask\`}`;
+
+  const patched = applyPatchTwice(applyLinuxSidebarScrollPerformancePatch, source);
+
+  assert.equal(
+    (patched.match(/animationName:`none`,animationTimeline:`auto`/g) ?? []).length,
+    1,
+  );
+  assert.match(
+    patched,
+    /"--bottom-fade":`calc\(var\(--spacing\) \* 10\)`/,
+  );
+  assert.match(
+    patched,
+    /onScroll:e=>\{let t=D\.current;.*let\{scrollTop:n\}=e\.currentTarget;C\|\|\(u\?\.\(n>0\),r\(n\)\)\}/,
+  );
+  assert.match(patched, /function unrelated\(\)\{return`vertical-scroll-fade-mask`\}/);
+  assert.equal(matchesLinuxSidebarScrollPerformanceContract(patched), true);
+});
+
+test("matches the semantic main-sidebar contract rather than generic fade masks", () => {
+  assert.equal(matchesLinuxSidebarScrollPerformanceContract(sidebarScrollFixture()), true);
+  assert.equal(
+    matchesLinuxSidebarScrollPerformanceContract(
+      "function generic(){return jsx(`div`,{className:`vertical-scroll-fade-mask [contain:layout_paint]`,onScroll:e=>e.currentTarget.scrollTop})}",
+    ),
+    false,
+  );
+  assert.equal(
+    matchesLinuxSidebarScrollPerformanceContract(sidebarScrollFixture({ duplicate: true })),
+    false,
+  );
+});
+
+test("leaves the sidebar asset byte-identical when its scroll handler drifts", () => {
+  const source = sidebarScrollFixture({
+    handler: "e=>{r(e.currentTarget.dataset.scrollPosition)}",
+  });
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxSidebarScrollPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the main sidebar scroll container — skipping Linux sidebar scroll performance patch",
+  ]);
+});
+
+test("leaves ambiguous sidebar assets byte-identical", () => {
+  const source = sidebarScrollFixture({ duplicate: true });
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxSidebarScrollPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely identify the main sidebar scroll container — skipping Linux sidebar scroll performance patch",
+  ]);
+});
+
+test("rejects an incomplete sidebar performance patch marker", () => {
+  const source = sidebarScrollFixture().replace(
+    "),ref:p,onScroll:",
+    "),style:{animationName:`none`},ref:p,onScroll:",
+  );
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxSidebarScrollPerformancePatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Found incomplete Linux sidebar scroll performance patch — skipping",
+  ]);
 });
 
 test("removes native title tooltip from the thread side panel toolbar action", () => {

@@ -66,6 +66,16 @@ let
       meta = base.meta or { };
     };
   desktopPackage = if codexCliPath != null then withCodexCliPath basePackage else basePackage;
+  remoteControlCodexHome =
+    if remoteCfg.codexHome != null then remoteCfg.codexHome else "%h/.codex";
+  remoteControlListenIsUnixSocket =
+    remoteCfg.listen == "unix://"
+    || builtins.match "unix:///[^/].*" remoteCfg.listen != null;
+  remoteControlProxySocket =
+    if remoteCfg.listen == "unix://" then
+      "${remoteControlCodexHome}/app-server-control/app-server-control.sock"
+    else
+      lib.removePrefix "unix://" remoteCfg.listen;
   remoteControlPath = lib.makeSearchPath "bin" (
     [
       "/run/current-system/sw"
@@ -73,7 +83,7 @@ let
     ++ remoteCfg.extraPackages
   );
   remoteControlEnvironment = {
-    CODEX_HOME = if remoteCfg.codexHome != null then remoteCfg.codexHome else "%h/.codex";
+    CODEX_HOME = remoteControlCodexHome;
     PATH = remoteControlPath;
   }
   // remoteCfg.environment;
@@ -170,8 +180,10 @@ in
         type = lib.types.str;
         default = "unix://";
         description = ''
-          Local app-server transport endpoint passed to
-          {command}`codex app-server --listen`.
+          Unix-socket app-server endpoint passed to
+          {command}`codex app-server --listen`. Use {option}`unix://` for the
+          default socket under {env}`CODEX_HOME`, or an absolute
+          {option}`unix:///path` endpoint.
         '';
       };
 
@@ -250,6 +262,10 @@ in
         message = "`programs.codexDesktopLinux.remoteControl.enable` is only supported on Linux";
       }
       {
+        assertion = !remoteCfg.enable || remoteControlListenIsUnixSocket;
+        message = "`programs.codexDesktopLinux.remoteControl.listen` must be `unix://` or an absolute `unix:///path` endpoint";
+      }
+      {
         assertion =
           remoteCfg.environmentFile == null
           || (!builtins.hasContext remoteCfg.environmentFile && remoteEnvironmentFileIsCanonical);
@@ -281,9 +297,15 @@ in
       basePackage
     ];
 
-    environment.sessionVariables = lib.mkIf (remoteCfg.enable && remoteCfg.disableLauncherAutostart) {
-      CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
-    };
+    environment.sessionVariables = lib.mkIf remoteCfg.enable (
+      {
+        CODEX_REMOTE_CONTROL_APP_SERVER_MODE = "proxy";
+        CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET = remoteControlProxySocket;
+      }
+      // lib.optionalAttrs remoteCfg.disableLauncherAutostart {
+        CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
+      }
+    );
 
     systemd.user.services.codex-remote-control = lib.mkIf remoteCfg.enable {
       description = "Codex remote-control app-server";

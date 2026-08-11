@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Native remote-mobile builds now route side-by-side `--new-instance` launches
+  through the normal single-instance handoff, preventing competing Desktop
+  Remote Control owners. Nix module sessions instead proxy every Desktop
+  app-server RPC to the single declarative systemd owner, so enablement,
+  pairing, and status calls reach the process listening on the Unix control
+  socket without restricting non-owner Desktop instances.
 - Deferred upstream DMGs are revalidated before a build. A newer candidate
   supersedes the pending download, and a deleted cached DMG is redownloaded in
   the same explicit check. Fresh app-launch checks preserve the stable deferred

@@ -120,6 +120,7 @@ LAUNCH_ACTION_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$APP_STATE_DIR}/$CODEX_LINUX_APP_I
 LAUNCH_ACTION_SOCKET="$LAUNCH_ACTION_RUNTIME_DIR/launch-action.sock"
 PACKAGED_RUNTIME_HELPER="$SCRIPT_DIR/.codex-linux/codex-packaged-runtime.sh"
 COLD_START_HOOK_DIR="$SCRIPT_DIR/.codex-linux/cold-start.d"
+SINGLE_INSTANCE_REQUIRED_MARKER="$SCRIPT_DIR/.codex-linux/single-instance-required"
 FEATURE_ENV_DIR="$SCRIPT_DIR/.codex-linux/env.d"
 FEATURE_PRELAUNCH_HOOK_DIR="$SCRIPT_DIR/.codex-linux/prelaunch.d"
 FEATURE_ELECTRON_ARGS_DIR="$SCRIPT_DIR/.codex-linux/electron-args.d"
@@ -257,6 +258,14 @@ parse_launcher_args() {
 configure_multi_launch_instance() {
     parse_launcher_args "$@"
     [ "$MULTI_LAUNCH_REQUESTED" -eq 1 ] || return 0
+
+    if [ "${CODEX_REMOTE_CONTROL_APP_SERVER_MODE:-}" != "proxy" ] &&
+       [ -f "$SINGLE_INSTANCE_REQUIRED_MARKER" ] &&
+       [ ! -L "$SINGLE_INSTANCE_REQUIRED_MARKER" ]; then
+        echo "$CODEX_LINUX_APP_DISPLAY_NAME requires one Desktop instance while Remote Control is enabled; using the existing instance." >&2
+        MULTI_LAUNCH_REQUESTED=0
+        return 0
+    fi
 
     local base_state_dir="$APP_STATE_DIR"
     local selected_port

@@ -262,6 +262,32 @@ This installs the selected ChatGPT Desktop package variant and starts a user
 codex app-server --remote-control --listen unix://
 ```
 
+That service is the only Remote Control owner. The module exports
+`CODEX_REMOTE_CONTROL_APP_SERVER_MODE=proxy` to the graphical session, so the
+app-server child started by Desktop uses this route:
+
+```text
+Desktop -> codex app-server proxy --sock <owner socket>
+        -> Unix control socket -> systemd app-server --remote-control
+```
+
+The proxy forwards the complete Desktop stdio RPC stream, including host
+enablement, pairing, and status calls. The single-instance marker is therefore
+not enforced for this topology: multiple Desktop instances may use the one
+declarative owner. The module exports
+`CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET` so custom `codexHome` and
+absolute `unix:///path` listener settings select the same socket in the service
+and Desktop proxy; non-Unix listeners are rejected. By default the module also
+exports
+`CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED=1` to suppress the mutable
+launcher fallback. If the service or socket is unavailable, proxy startup
+fails instead of creating another owner.
+
+The selected CLI must support `codex app-server proxy` (validated with Codex
+CLI 0.147.0). After changing these session variables, start a new graphical
+session or otherwise refresh the session environment before relaunching
+Desktop.
+
 A `nixosModules.default` export is also available for system-level
 configurations that prefer a global user unit.
 

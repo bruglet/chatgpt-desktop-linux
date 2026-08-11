@@ -65,6 +65,14 @@ let
   desktopPackage = if codexCliPath != null then withCodexCliPath basePackage else basePackage;
   codexHome =
     if remoteCfg.codexHome != null then remoteCfg.codexHome else "${config.home.homeDirectory}/.codex";
+  remoteControlListenIsUnixSocket =
+    remoteCfg.listen == "unix://"
+    || builtins.match "unix:///[^/].*" remoteCfg.listen != null;
+  remoteControlProxySocket =
+    if remoteCfg.listen == "unix://" then
+      "${codexHome}/app-server-control/app-server-control.sock"
+    else
+      lib.removePrefix "unix://" remoteCfg.listen;
   remoteControlPath = lib.makeSearchPath "bin" (
     [
       config.home.profileDirectory
@@ -169,8 +177,10 @@ in
         type = lib.types.str;
         default = "unix://";
         description = ''
-          Local app-server transport endpoint passed to
-          {command}`codex app-server --listen`.
+          Unix-socket app-server endpoint passed to
+          {command}`codex app-server --listen`. Use {option}`unix://` for the
+          default socket under {env}`CODEX_HOME`, or an absolute
+          {option}`unix:///path` endpoint.
         '';
       };
 
@@ -248,6 +258,10 @@ in
         message = "`programs.codexDesktopLinux.remoteControl.enable` is only supported on Linux";
       }
       {
+        assertion = !remoteCfg.enable || remoteControlListenIsUnixSocket;
+        message = "`programs.codexDesktopLinux.remoteControl.listen` must be `unix://` or an absolute `unix:///path` endpoint";
+      }
+      {
         assertion =
           remoteCfg.environmentFile == null
           || (!builtins.hasContext remoteCfg.environmentFile && remoteEnvironmentFileIsCanonical);
@@ -275,13 +289,25 @@ in
       desktopPackage
     ];
 
-    home.sessionVariables = lib.mkIf (remoteCfg.enable && remoteCfg.disableLauncherAutostart) {
-      CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
-    };
+    home.sessionVariables = lib.mkIf remoteCfg.enable (
+      {
+        CODEX_REMOTE_CONTROL_APP_SERVER_MODE = "proxy";
+        CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET = remoteControlProxySocket;
+      }
+      // lib.optionalAttrs remoteCfg.disableLauncherAutostart {
+        CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
+      }
+    );
 
-    systemd.user.sessionVariables = lib.mkIf (remoteCfg.enable && remoteCfg.disableLauncherAutostart) {
-      CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
-    };
+    systemd.user.sessionVariables = lib.mkIf remoteCfg.enable (
+      {
+        CODEX_REMOTE_CONTROL_APP_SERVER_MODE = "proxy";
+        CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET = remoteControlProxySocket;
+      }
+      // lib.optionalAttrs remoteCfg.disableLauncherAutostart {
+        CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED = "1";
+      }
+    );
 
     systemd.user.services.codex-remote-control = lib.mkIf remoteCfg.enable {
       Unit = {

@@ -500,6 +500,44 @@ function runStageHook(env) {
   });
 }
 
+function runLauncherMultiLaunchPolicy(installDir, env = {}) {
+  const launcher = fs.readFileSync(path.join(REPO_ROOT, "launcher", "start.sh.template"), "utf8");
+  const functions = launcher
+    .split("early_truthy_env_value() {", 2)[1]
+    .split('configure_multi_launch_instance "$@"', 1)[0];
+  const probe = path.join(installDir, "multi-launch-policy-probe.sh");
+  fs.writeFileSync(probe, [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    `SCRIPT_DIR=${JSON.stringify(installDir)}`,
+    'SINGLE_INSTANCE_REQUIRED_MARKER="$SCRIPT_DIR/.codex-linux/single-instance-required"',
+    'CODEX_LINUX_APP_ID="codex-remote-policy-test"',
+    'CODEX_LINUX_APP_DISPLAY_NAME="ChatGPT"',
+    'CODEX_LINUX_WEBVIEW_PORT="62000"',
+    'CODEX_MULTI_LAUNCH_PORT_RANGE="62000-62004"',
+    'CODEX_MULTI_LAUNCH_REQUEST=""',
+    'APP_STATE_DIR="$SCRIPT_DIR/state"',
+    'APP_PID_FILE="$APP_STATE_DIR/app.pid"',
+    'WEBVIEW_PID_FILE="$APP_STATE_DIR/webview.pid"',
+    'LAUNCH_ACTION_RUNTIME_DIR="$APP_STATE_DIR/runtime"',
+    'LAUNCH_ACTION_SOCKET="$LAUNCH_ACTION_RUNTIME_DIR/launch-action.sock"',
+    'LOG_DIR="$SCRIPT_DIR/log"',
+    'MULTI_LAUNCH_REQUESTED=0',
+    'MULTI_LAUNCH_ACTIVE=0',
+    'CODEX_LINUX_INSTANCE_ID=""',
+    'LAUNCHER_ARGS=()',
+    "early_truthy_env_value() {",
+    functions,
+    'configure_multi_launch_instance "$@"',
+    'printf "active=%s port=%s args=%s\\n" "$MULTI_LAUNCH_ACTIVE" "$CODEX_LINUX_WEBVIEW_PORT" "${LAUNCHER_ARGS[*]}"',
+    "",
+  ].join("\n"));
+  return spawnSync("bash", [probe, "--new-instance"], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+}
+
 function writeDesktopAppServerRemoteControlMarker(appDir) {
   const marker = path.join(appDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
   fs.mkdirSync(path.dirname(marker), { recursive: true });
@@ -524,7 +562,7 @@ test("remote mobile control feature exposes its stage hook when enabled", () => 
   });
 });
 
-test("remote mobile stage hook is idempotent and stages its markers and executable hook", () => {
+test("remote mobile stage hook reserves one Desktop instance only for Desktop ownership", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
@@ -533,6 +571,7 @@ test("remote mobile stage hook is idempotent and stages its markers and executab
     const featureMarker = path.join(installDir, ".codex-linux", "remote-mobile-control-enabled");
     const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
     const coldStartHook = path.join(installDir, ".codex-linux", "cold-start.d", "remote-mobile-control");
+    const singleInstanceMarker = path.join(installDir, ".codex-linux", "single-instance-required");
     const env = {
       ARCH: "x64",
       CODEX_UPSTREAM_APP_DIR: path.join(tempRoot, "upstream-app"),
@@ -554,11 +593,23 @@ test("remote mobile stage hook is idempotent and stages its markers and executab
     assert.equal(second.status, 0, second.stderr || second.stdout);
     assert.equal(fs.readFileSync(featureMarker, "utf8"), "remote-mobile-control\n");
     assert.equal(fs.readFileSync(marker, "utf8"), "version=1\nowner=desktop\n");
+    assert.equal(
+      fs.readFileSync(singleInstanceMarker, "utf8"),
+      "version=1\nfeature=remote-mobile-control\n",
+    );
     assert.equal(fs.statSync(coldStartHook).mode & 0o777, 0o755);
     assert.equal(
       fs.readFileSync(coldStartHook, "utf8"),
       fs.readFileSync(path.join(__dirname, "cold-start-hook.sh"), "utf8"),
     );
+    const policy = runLauncherMultiLaunchPolicy(installDir);
+    assert.equal(policy.status, 0, policy.stderr || policy.stdout);
+    assert.equal(policy.stdout.trim(), "active=0 port=62000 args=");
+    const proxyPolicy = runLauncherMultiLaunchPolicy(installDir, {
+      CODEX_REMOTE_CONTROL_APP_SERVER_MODE: "proxy",
+    });
+    assert.equal(proxyPolicy.status, 0, proxyPolicy.stderr || proxyPolicy.stdout);
+    assert.equal(proxyPolicy.stdout.trim(), "active=1 port=62000 args=");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -1242,22 +1293,57 @@ test("Linux remote-control client recovery handles bare missing key material err
   assert.match(patched, /e\.message===`Remote-control client key material missing`/);
 });
 
-test("Linux remote mobile app-server launch enables remote control on the Desktop app-server", () => {
-  const source = syntheticCurrentLocalAppServerLaunchBundle();
-  const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
+test("Linux remote mobile app-server launch keeps Desktop as the native Remote Control owner", () => {
+  const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(
+    syntheticCurrentLocalAppServerLaunchBundle(),
+  );
+  const context = {
+    JSON,
+    module: { exports: {} },
+    process: { env: {}, platform: "linux" },
+  };
 
-  assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteMobileLocalAppServerArgs/);
-  assert.match(
-    patched,
-    /process\.platform===`linux`\?\[`--remote-control`\]:\[\]/,
-  );
-  assert.match(
-    patched,
-    /return\[\.\.\.Iz,\.\.\.Lz\.flatMap\(.+`app-server`,\.\.\.codexLinuxRemoteMobileLocalAppServerArgs\(\),`--analytics-default-enabled`\]\}/,
-  );
+  vm.runInNewContext(`${patched};module.exports=uB;`, context);
+
+  assert.deepEqual(Array.from(context.module.exports()), [
+    "-c",
+    "features.code_mode_host=true",
+    "app-server",
+    "--remote-control",
+    "--analytics-default-enabled",
+  ]);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
   assert.equal(hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(patched), true);
+});
+
+test("Linux remote mobile app-server launch proxies Desktop RPCs to the declarative owner", () => {
+  const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(
+    syntheticCurrentLocalAppServerLaunchBundle(),
+  );
+  const context = {
+    JSON,
+    module: { exports: {} },
+    process: {
+      env: {
+        CODEX_REMOTE_CONTROL_APP_SERVER_MODE: "proxy",
+        CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET:
+          "%h/.codex/app-server-control/app-server-control.sock",
+        HOME: "/home/tester",
+      },
+      platform: "linux",
+    },
+  };
+
+  vm.runInNewContext(`${patched};module.exports=uB;`, context);
+
+  assert.deepEqual(Array.from(context.module.exports()), [
+    "-c",
+    "features.code_mode_host=true",
+    "app-server",
+    "proxy",
+    "--sock",
+    "/home/tester/.codex/app-server-control/app-server-control.sock",
+  ]);
 });
 
 test("Linux remote mobile app-server launch rejects an incomplete local patch marker", () => {

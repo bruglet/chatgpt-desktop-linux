@@ -192,12 +192,24 @@ let
   '';
   customConfig = combinedConfig // { package = customPackage; };
   nixosCustom = evalNixOS customConfig;
+  remoteControlTestPackage = pkgs.writeShellScriptBin "codex" "exit 0";
+  expectedRemoteControlExecStart = lib.escapeShellArgs [
+    (lib.getExe remoteControlTestPackage)
+    "app-server"
+    "--remote-control"
+    "--listen"
+    "unix://"
+  ];
+  expectedHomeRemoteControlProxySocket =
+    "/home/tester/.codex/app-server-control/app-server-control.sock";
+  expectedNixOSRemoteControlProxySocket =
+    "%h/.codex/app-server-control/app-server-control.sock";
   remoteControlConfig = {
     enable = true;
     package = customPackage;
     remoteControl = {
       enable = true;
-      package = pkgs.writeShellScriptBin "codex" "exit 0";
+      package = remoteControlTestPackage;
       environmentFile = "/run/secrets/codex-remote-control.env";
     };
   };
@@ -206,10 +218,39 @@ let
     // {
       remoteControl = remoteControlConfig.remoteControl // { inherit environmentFile; };
     };
-  homeRemoteService =
-    (evalHomeManager remoteControlConfig).config.systemd.user.services.codex-remote-control;
-  nixosRemoteService =
-    (evalNixOS remoteControlConfig).config.systemd.user.services.codex-remote-control;
+  remoteControlLauncherAutostartConfig = remoteControlConfig // {
+    remoteControl = remoteControlConfig.remoteControl // {
+      disableLauncherAutostart = false;
+    };
+  };
+  remoteControlCustomSocketConfig = remoteControlConfig // {
+    remoteControl = remoteControlConfig.remoteControl // {
+      listen = "unix:///run/user/1000/codex-custom.sock";
+    };
+  };
+  remoteControlInvalidListenConfigs = map (
+    listen:
+    remoteControlConfig
+    // {
+      remoteControl = remoteControlConfig.remoteControl // { inherit listen; };
+    }
+  ) [ "ws://127.0.0.1:8765" "unix:///" "unix:////run/user/1000/codex.sock" ];
+  homeRemoteConfig = (evalHomeManager remoteControlConfig).config;
+  nixosRemoteConfig = (evalNixOS remoteControlConfig).config;
+  homeRemoteLauncherAutostartConfig =
+    (evalHomeManager remoteControlLauncherAutostartConfig).config;
+  nixosRemoteLauncherAutostartConfig =
+    (evalNixOS remoteControlLauncherAutostartConfig).config;
+  homeRemoteCustomSocketConfig = (evalHomeManager remoteControlCustomSocketConfig).config;
+  nixosRemoteCustomSocketConfig = (evalNixOS remoteControlCustomSocketConfig).config;
+  homeRemoteInvalidListenAssertions = map (
+    config: (evalHomeManager config).config.assertions
+  ) remoteControlInvalidListenConfigs;
+  nixosRemoteInvalidListenAssertions = map (
+    config: (evalNixOS config).config.assertions
+  ) remoteControlInvalidListenConfigs;
+  homeRemoteService = homeRemoteConfig.systemd.user.services.codex-remote-control;
+  nixosRemoteService = nixosRemoteConfig.systemd.user.services.codex-remote-control;
   optionalHomeRemoteService =
     (evalHomeManager (
       remoteControlConfigWithEnvironmentFile "-/run/secrets/codex-remote-control.env"
@@ -387,6 +428,75 @@ assert lib.assertMsg
   "the package builder rejected the shallow repository-watch feature";
 assert lib.assertMsg (!invalidHomeManager.success) "Home Manager accepted an unsupported feature";
 assert lib.assertMsg (!invalidNixOS.success) "NixOS accepted an unsupported feature";
+assert lib.assertMsg
+  (homeRemoteConfig.home.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "Home Manager did not route Desktop RPCs to the declarative Remote Control owner";
+assert lib.assertMsg
+  (homeRemoteConfig.systemd.user.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "Home Manager did not export proxy mode to systemd user sessions";
+assert lib.assertMsg
+  (nixosRemoteConfig.environment.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "NixOS did not route Desktop RPCs to the declarative Remote Control owner";
+assert lib.assertMsg
+  (lib.all (assertions: lib.any (item: !item.assertion) assertions) homeRemoteInvalidListenAssertions)
+  "Home Manager accepted an invalid Remote Control owner socket";
+assert lib.assertMsg
+  (lib.all (assertions: lib.any (item: !item.assertion) assertions) nixosRemoteInvalidListenAssertions)
+  "NixOS accepted an invalid Remote Control owner socket";
+assert lib.assertMsg
+  (
+    homeRemoteConfig.home.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET
+      == expectedHomeRemoteControlProxySocket
+  )
+  "Home Manager did not point Desktop proxy RPCs at the declarative owner socket";
+assert lib.assertMsg
+  (
+    homeRemoteConfig.systemd.user.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET
+      == expectedHomeRemoteControlProxySocket
+  )
+  "Home Manager did not export the declarative owner socket to systemd user sessions";
+assert lib.assertMsg
+  (
+    nixosRemoteConfig.environment.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET
+      == expectedNixOSRemoteControlProxySocket
+  )
+  "NixOS did not point Desktop proxy RPCs at the declarative owner socket";
+assert lib.assertMsg
+  (
+    homeRemoteCustomSocketConfig.home.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET
+      == "/run/user/1000/codex-custom.sock"
+  )
+  "Home Manager did not route Desktop RPCs to a custom declarative owner socket";
+assert lib.assertMsg
+  (
+    nixosRemoteCustomSocketConfig.environment.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_PROXY_SOCKET
+      == "/run/user/1000/codex-custom.sock"
+  )
+  "NixOS did not route Desktop RPCs to a custom declarative owner socket";
+assert lib.assertMsg
+  (homeRemoteService.Service.ExecStart == expectedRemoteControlExecStart)
+  "Home Manager Remote Control service is not the Unix-socket owner";
+assert lib.assertMsg
+  (nixosRemoteService.serviceConfig.ExecStart == expectedRemoteControlExecStart)
+  "NixOS Remote Control service is not the Unix-socket owner";
+assert lib.assertMsg
+  (homeRemoteLauncherAutostartConfig.home.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "Home Manager tied Desktop proxy mode to launcher daemon suppression";
+assert lib.assertMsg
+  (homeRemoteLauncherAutostartConfig.systemd.user.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "Home Manager omitted systemd proxy mode when launcher daemon suppression is disabled";
+assert lib.assertMsg
+  (nixosRemoteLauncherAutostartConfig.environment.sessionVariables.CODEX_REMOTE_CONTROL_APP_SERVER_MODE == "proxy")
+  "NixOS tied Desktop proxy mode to launcher daemon suppression";
+assert lib.assertMsg
+  (!(homeRemoteLauncherAutostartConfig.home.sessionVariables ? CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED))
+  "Home Manager suppressed launcher daemon autostart after its option was disabled";
+assert lib.assertMsg
+  (!(homeRemoteLauncherAutostartConfig.systemd.user.sessionVariables ? CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED))
+  "Home Manager exported systemd launcher daemon suppression after its option was disabled";
+assert lib.assertMsg
+  (!(nixosRemoteLauncherAutostartConfig.environment.sessionVariables ? CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED))
+  "NixOS suppressed launcher daemon autostart after its option was disabled";
 assert lib.assertMsg
   (homeRemoteService.Service.EnvironmentFile == "/run/secrets/codex-remote-control.env")
   "Home Manager changed the runtime remote-control environment-file path";

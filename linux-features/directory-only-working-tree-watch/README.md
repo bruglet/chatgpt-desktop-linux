@@ -1,6 +1,6 @@
 # Directory-Only Working-Tree Watch
 
-This opt-in Linux feature replaces Codex Desktop's recursive working-tree
+This opt-in Linux feature replaces ChatGPT Community's recursive working-tree
 `fs.watch` call with [Watchbound](https://www.npmjs.com/package/watchbound).
 Watchbound owns recursive inotify topology, process-wide native-watch
 allocation, bounded delivery, coverage reporting, reconciliation, root
@@ -17,10 +17,10 @@ coverage.
 
 ## Current OpenAI working-tree route
 
-OpenAI Desktop `26.803.41515` has a Linux-specific Parcel working-tree path in
-the official macOS DMG. That path calls `@parcel/watcher` directly instead of
+OpenAI Desktop `26.803.81509` has a Linux-specific Parcel working-tree path in
+the official Linux package. That path calls `@parcel/watcher` directly instead of
 the local `startFileWatch()` method this feature intercepts. When this feature
-is selected, its current-DMG patch reroutes that one local recursive
+is selected, its current-package patch reroutes that one local recursive
 working-tree request through `startFileWatch()`, where the exact recursive
 working-tree contract enters Watchbound. Remote watches and non-working-tree
 file watches retain their existing routes.
@@ -58,34 +58,30 @@ alternative policies; do not enable both at once.
 ## Current package boundary
 
 The integration pins the official Watchbound `2.1.1` wrapper, neutral loader,
-x64 GNU target, ARM64 GNU target, and ARMv7 GNU hard-float target archives. The
+x64 GNU target, and ARM64 GNU target archives. The
 artifact manifest records each registry URL, npm integrity, npm shasum, archive
-SHA-256, complete file contract, and native SHA-256. It must contain all three
-supported Codex Linux architectures, while staging selects exactly one target
-for the build architecture. Musl, ARM soft-float or unknown ARM ABIs, and
+SHA-256, complete file contract, and native SHA-256. It must contain both
+officially supported ChatGPT Linux architectures, while staging selects exactly
+one target for the build architecture. Musl, ARMv7/armhf, and
 non-Linux targets are rejected by Watchbound's runtime qualification. The
 selected `.node` file is unpacked by the existing ASAR native-file rule.
 
-Normal builds fetch the pinned npm packages. The manifest pins five archives in
+Normal builds fetch the pinned npm packages. The manifest pins four archives in
 total; a fully offline build provides the three selected for its architecture:
 
 ```bash
 export CODEX_WATCHBOUND_ARCHIVE=/path/to/watchbound-2.1.1.tgz
 export CODEX_WATCHBOUND_NODE_ARCHIVE=/path/to/gadicc-watchbound-node-2.1.1.tgz
 export CODEX_WATCHBOUND_NODE_X64_ARCHIVE=/path/to/gadicc-watchbound-node-linux-x64-gnu-2.1.1.tgz
-# Use CODEX_WATCHBOUND_NODE_ARM64_ARCHIVE on ARM64 or
-# CODEX_WATCHBOUND_NODE_ARM_ARCHIVE on ARMv7/armhf.
-./install.sh ./Codex.dmg
+# Use CODEX_WATCHBOUND_NODE_ARM64_ARCHIVE on ARM64.
+./install.sh /path/to/chatgpt_<version>_<arch>.deb
 ```
 
-Watchbound `2.1.1` qualifies x64, ARM64, and exact little-endian ARMv7
-hard-float GNU/Linux with a Linux 5.15 floor, Node 24.15–24.x, and a GLIBC 2.35
+Watchbound `2.1.1` qualifies x64 and ARM64 GNU/Linux with a Linux 5.15 floor,
+Node 24.15–24.x, and a GLIBC 2.35
 baseline. Its native matrix covers Ubuntu 22.04/24.04, Debian 12, Fedora 42,
 openSUSE Tumbleweed, Nix, and Arch on x64; ARM64 has the same lanes except Arch.
-ARMv7 has deterministic cross-build/package evidence plus production loader
-and watch lifecycles under pinned QEMU-user Electron 42.3.0 and a booted ARMHF
-5.15 kernel; this is emulated qualification, not native-hardware or performance
-evidence. The adapter consumes capability schema 9 and requires binding API 5,
+The adapter consumes capability schema 9 and requires binding API 5,
 lockstep wrapper/native/engine `2.1.1` identities, native directory-name exclusions,
 observed excluded paths, exact path bytes, root qualification, physical root
 resolution, and `support.currentRuntime.targetCompatible`. It requires
@@ -93,7 +89,26 @@ resolution, and `support.currentRuntime.targetCompatible`. It requires
 established physical root still matches that qualification snapshot. It does
 not recreate Watchbound's target or root decision from host strings.
 
-Build-time runtime qualification does not execute the downloaded Electron
+Watchbound's wrapper and loader detect libc through `process.report.getReport()`.
+Inside the packaged Electron binary that call is fatal — an internal CHECK
+aborts the process with SIGILL (the openai/codex#38123 git-watcher crash
+class) — so the adapter replaces `process.report` in both patched bundles
+(the worker and the main-process src bundle) with a shim that keeps the
+original report members and overrides only `getReport`, before any Watchbound
+code loads. The shim serves the same libc facts from
+probes that stay in JavaScript: the ELF interpreter of `/proc/self/exe`,
+`/usr/bin/ldd` content, and a `getconf GNU_LIBC_VERSION` subprocess. A Nix
+store interpreter names its exact glibc, so closure-only Nix launches (no
+`/usr/bin/ldd`, no `getconf` on the runtime `PATH`) take the version straight
+from the `PT_INTERP` path — readable because the Nix build relocates
+`PT_INTERP` into the scanned range (#1332). The shim stays
+installed for the process's lifetime so later capability reads remain safe.
+When every probe fails, the shim reports an empty header; Watchbound then
+refuses at load, the adapter catches the refused import, and the request
+degrades to the preserved Parcel route (worker) or the original local watch
+(src bundle) instead of crashing.
+
+Build-time runtime qualification does not execute the upstream Electron
 binary. The extracted app's pinned Electron dependency must match the exact
 Electron/Node pair in the checked-in Watchbound artifact manifest; a mismatch
 rejects this enabled feature before package materialization.
@@ -120,10 +135,10 @@ one watcher owner, and the feature adds no polling.
 
 Watchbound upgrades are deliberate lockstep changes. An upgrade must refresh
 the source revision, Cargo lock, every supported published target, the complete
-archive/file manifest, the capability contract, and the latest-DMG fixture.
+archive/file manifest, the capability contract, and the latest-package fixture.
 The focused integration suite, all-system flake evaluation, and the
 Watchbound-enabled watchdog output then exercise that state. Missing targets,
-package drift, runtime mismatch, current-DMG drift, or an unprovable rollback
+package drift, runtime mismatch, current-package drift, or an unprovable rollback
 reject an enabled-feature candidate; users who leave the feature disabled do
 not enter this package or patch path.
 

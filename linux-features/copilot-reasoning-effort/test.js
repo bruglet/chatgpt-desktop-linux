@@ -132,18 +132,12 @@ test("persists Copilot reasoning effort through the current default writer", () 
   );
 });
 
-test("current DMG descriptors target only the owning Copilot chunks", () => {
-  const settingsChunk =
-    "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js";
-  const uiChunk =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-DRU9Ekz0.js";
-  const adjacentChunk =
-    "app-initial~app-main~new-thread-panel-page~onboarding-page~appgen-library-page~hotkey-windo~d4kxte0o-BsjKAgmz.js";
+test("current package descriptors use the semantic app-initial owner", () => {
+  const currentChunk = "app-initial-Bd3Z1bES.js";
+  const adjacentChunk = "projects-index-page-DjNy92Xe.js";
   const loaded = require("./patch.js").descriptors;
 
-  assert.equal(loaded[0].pattern.test(settingsChunk), true);
-  assert.equal(loaded[1].pattern.test(settingsChunk), true);
-  assert.equal(loaded[2].pattern.test(uiChunk), true);
+  assert.ok(loaded.every((descriptor) => descriptor.pattern.test(currentChunk)));
   assert.ok(loaded.every((descriptor) => descriptor.pattern.test(adjacentChunk) === false));
 });
 
@@ -220,10 +214,8 @@ test("feature descriptor loader exposes the Copilot webview asset patches only w
       ["webview-asset", "webview-asset", "webview-asset"],
     );
     assert.ok(descriptors.every((descriptor) => descriptor.ciPolicy === "optional"));
-    const currentSettingsChunk =
-      "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-current.js";
-    const currentUiChunk =
-      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-current.js";
+    const currentSettingsChunk = "app-initial-settings-current.js";
+    const currentUiChunk = "app-initial-ui-current.js";
     assert.match(currentSettingsChunk, descriptors[0].pattern);
     assert.match(currentSettingsChunk, descriptors[1].pattern);
     assert.match(currentUiChunk, descriptors[2].pattern);
@@ -233,10 +225,8 @@ test("feature descriptor loader exposes the Copilot webview asset patches only w
 
 test("enabled feature descriptors patch the current app settings chunk", () => {
   const featuresRoot = path.resolve(__dirname, "..");
-  const currentSettingsChunk =
-    "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js";
-  const currentUiChunk =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-DRU9Ekz0.js";
+  const currentSettingsChunk = "app-initial-settings-Bd3Z1bES.js";
+  const currentUiChunk = "app-initial-ui-Bd3Z1bES.js";
 
   withTempFeatureConfig(["copilot-reasoning-effort"], () => {
     withTempDir((extractedDir) => {

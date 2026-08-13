@@ -333,6 +333,14 @@ function recordReplayUpstreamTranscriptPattern() {
   return /([A-Za-z_$][\w$]*)\.length>0&&\((([A-Za-z_$][\w$]*)\.getInstance\(\)\.dispatchMessage\(`global-dictation-record-history-item`,\{text:\1\}\),([A-Za-z_$][\w$]*)===`send`\?([A-Za-z_$][\w$]*)\.onTranscriptSend\(\1\):\5\.onTranscriptInsert\(\1\))\)/u;
 }
 
+function recordReplayPersistentTranscriptPattern() {
+  const id = String.raw`[A-Za-z_$][\w$]*`;
+  return new RegExp(
+    String.raw`(?<transcript>${id})\.length>0&&\((?<dispatch>(?<persistence>${id})==null\?(?<history>${id})\.getInstance\(\)\.dispatchMessage\(\`global-dictation-record-history-item\`,\{text:\k<transcript>\}\):\k<persistence>\.setTranscript\(\k<transcript>\),(?<analytics>${id})\.performance\.mark\(\`transcript_dispatched\`\),(?<action>${id})===\`send\`\?(?<handlers>${id})\.onTranscriptSend\(\k<transcript>\):\k<handlers>\.onTranscriptInsert\(\k<transcript>\))\)`,
+    "",
+  );
+}
+
 function applyRecordReplayHudPatch(currentSource) {
   if (currentSource.includes("codexLinuxRecordReplayHudVersion=")) {
     return currentSource;
@@ -359,6 +367,17 @@ function applyRecordReplayDictationTranscriptPatch(currentSource) {
     );
   }
 
+  const persistentPattern = recordReplayPersistentTranscriptPattern();
+  if (persistentPattern.test(currentSource)) {
+    return currentSource.replace(
+      persistentPattern,
+      (...args) => {
+        const { transcript, action, dispatch } = args.at(-1);
+        return `${transcript}.length>0&&(${recordReplayTranscriptCaptureExpression(transcript, action)},${dispatch})`;
+      },
+    );
+  }
+
   const upstreamPattern = recordReplayUpstreamTranscriptPattern();
   if (upstreamPattern.test(currentSource)) {
     return currentSource.replace(
@@ -380,7 +399,16 @@ function hasRecordReplayDictationTranscriptContract(source) {
     return true;
   }
   return recordReplayConversationTranscriptPattern().test(source)
+    || recordReplayPersistentTranscriptPattern().test(source)
     || recordReplayUpstreamTranscriptPattern().test(source);
+}
+
+function recordReplayCurrentGlobalDictationPattern() {
+  const id = String.raw`[A-Za-z_$][\w$]*`;
+  return new RegExp(
+    String.raw`(?<prefix>(?<session>${id})\.analytics\.performance\.mark\(\`transcript_dispatched\`\),)(?<dispatch>${id})\.dispatchMessage\(\`global-dictation-completed\`,\{sessionId:\k<session>\.sessionId,text:(?<transcript>${id})\}\)`,
+    "",
+  );
 }
 
 function applyRecordReplayGlobalDictationTranscriptPatch(currentSource) {
@@ -390,6 +418,17 @@ function applyRecordReplayGlobalDictationTranscriptPatch(currentSource) {
   }
   if (!currentSource.includes("global-dictation-completed")) {
     return currentSource;
+  }
+
+  const currentCompletedPattern = recordReplayCurrentGlobalDictationPattern();
+  if (currentCompletedPattern.test(currentSource)) {
+    return currentSource.replace(
+      currentCompletedPattern,
+      (...args) => {
+        const { prefix, dispatch, session, transcript } = args.at(-1);
+        return `${prefix}${recordReplayActiveSpeechContextExpression(dispatch, transcript)},${dispatch}.dispatchMessage(\`global-dictation-completed\`,{sessionId:${session}.sessionId,text:${transcript}})`;
+      },
+    );
   }
 
   const completedPattern =

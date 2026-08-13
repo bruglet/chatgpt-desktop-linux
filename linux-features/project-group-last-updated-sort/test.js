@@ -27,6 +27,12 @@ const currentProjectSource = [
   "let{chatSortMode:j,projectSortMode:M}=t(xH),N=p5o({groups:A,items:f,projectOrder:jm(t,_u.PROJECT_ORDER)});",
 ].join("");
 
+const officialLinuxProjectSource = [
+  "function A6i(e,t){return e}",
+  "function O8o({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return A6i(e.map((e,t)=>({group:e,index:t,recencyAt:e.threadKeys.reduce((e,t)=>Math.max(e,r.get(t)??0),e.projectUpdatedAt??0)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}",
+  "let{chatSortMode:j,projectSortMode:M}=t(IH),N=O8o({groups:A,items:f,projectOrder:Dm(t,yu.PROJECT_ORDER)});",
+].join("");
+
 function captureWarns(fn) {
   const originalWarn = console.warn;
   const warnings = [];
@@ -156,6 +162,19 @@ test("patch passes the selected project sort mode into the group sorter", () => 
     patched.includes(
       "projectOrder:jm(t,_u.PROJECT_ORDER),sortMode:M",
     ),
+  );
+});
+
+test("patch matches the official 26.803.81509 project sorter semantically", () => {
+  const patched = applyPatchTwice(officialLinuxProjectSource);
+
+  assert.match(
+    patched,
+    /function O8o\(\{groups:e,items:t,projectOrder:n,sortMode:codexLinuxProjectSortMode\}\)/,
+  );
+  assert.match(
+    patched,
+    /O8o\(\{groups:A,items:f,projectOrder:Dm\(t,yu\.PROJECT_ORDER\),sortMode:M\}\)/,
   );
 });
 

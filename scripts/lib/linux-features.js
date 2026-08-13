@@ -10,11 +10,13 @@ const RESERVED_TOP_LEVEL_NAMES = new Set([
   "README.md",
   "features.example.json",
   "features.json",
+  "compatibility.json",
 ]);
-// Keep removed feature ids loadable so preserved update-builder configs still rebuild.
-const LEGACY_FEATURE_ID_ALIASES = new Map([
-  ["zed-opener", "open-target-discovery"],
-]);
+const FEATURE_COMPATIBILITY = require("../../linux-features/compatibility.json");
+const LEGACY_FEATURE_ID_ALIASES = new Map(Object.entries(FEATURE_COMPATIBILITY.aliases));
+// Only explicitly retired ids are ignored. This lets a preserved local config
+// survive a removal without making typos or arbitrary unknown ids fail open.
+const RETIRED_FEATURE_IDS = new Set(FEATURE_COMPATIBILITY.retired);
 
 const RUNTIME_HOOK_DIRS = {
   env: { dir: "env.d", executable: false },
@@ -152,6 +154,9 @@ function normalizeEnabledFeatureIds(value, sourcePath, options = {}) {
       continue;
     }
     const id = LEGACY_FEATURE_ID_ALIASES.get(item) ?? item;
+    if (RETIRED_FEATURE_IDS.has(id)) {
+      continue;
+    }
     if (seen.has(id)) {
       if (options.strict === true) {
         throw new Error(`Duplicate Linux feature id in ${sourcePath}: ${item}`);
@@ -209,6 +214,9 @@ function normalizeLinuxFeatureSettings(value, sourcePath) {
       continue;
     }
     const id = LEGACY_FEATURE_ID_ALIASES.get(rawId) ?? rawId;
+    if (RETIRED_FEATURE_IDS.has(id)) {
+      continue;
+    }
     if (rawSettings == null || typeof rawSettings !== "object" || Array.isArray(rawSettings)) {
       console.warn(`WARN: Linux feature '${rawId}' settings in ${sourcePath} must be an object`);
       continue;
@@ -1428,6 +1436,10 @@ function main() {
     }
     return;
   }
+  if (command === "--patch-descriptor-count") {
+    process.stdout.write(`${loadLinuxFeaturePatchDescriptors().length}\n`);
+    return;
+  }
   if (command === "--features-json") {
     process.stdout.write(`${JSON.stringify(featuresJsonSummary(), null, 2)}\n`);
     return;
@@ -1436,7 +1448,7 @@ function main() {
     process.stdout.write(`${linuxFeaturesRoot()}\n`);
     return;
   }
-  console.error("Usage: linux-features.js --enabled | --features-json | --features-root | --stage-install <install-dir> | --staged-files-json <install-dir> | --stage-hooks | --cleanup-hooks | --package-hooks <format> <app-dir> | --stage-package-resources <format> <package-root> <app-dir> | --restore-package-resource-permissions <format> <package-root> <app-dir> | --package-dependencies <format> <app-dir> | --package-files <format> <app-dir>");
+  console.error("Usage: linux-features.js --enabled | --patch-descriptor-count | --features-json | --features-root | --stage-install <install-dir> | --staged-files-json <install-dir> | --stage-hooks | --cleanup-hooks | --package-hooks <format> <app-dir> | --stage-package-resources <format> <package-root> <app-dir> | --restore-package-resource-permissions <format> <package-root> <app-dir> | --package-dependencies <format> <app-dir> | --package-files <format> <app-dir>");
   process.exit(1);
 }
 
@@ -1465,9 +1477,11 @@ module.exports = {
   loadEnabledLinuxFeatures,
   loadLinuxFeaturePatchDescriptors,
   linuxFeatureManifestMap,
+  linuxFeaturesConfig,
   linuxFeaturesConfigPath,
   linuxFeaturesRoot,
   resolveFeatureEntrypoint,
+  RETIRED_FEATURE_IDS,
   restoreEnabledLinuxFeaturePackageResourcePermissions,
   stageEnabledLinuxFeatureInstall,
   stageEnabledLinuxFeaturePackageResources,

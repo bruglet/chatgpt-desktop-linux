@@ -5,6 +5,7 @@ const {
 } = require("../../scripts/patches/lib/minified-js.js");
 
 const JS_IDENT = "[A-Za-z_$][\\w$]*";
+const BT = "`";
 
 function applyAuthenticatedProxyPatch(currentSource) {
   const electronVar = inferModuleAlias(currentSource, "electron");
@@ -56,15 +57,31 @@ function applyAuthenticatedProxyPatch(currentSource) {
     return patchedSource;
   }
 
-  const fetchNeedle =
+  const legacyFetchNeedle =
     `let f=i==null?await ${electronVar}.net.fetch(a,{method:r,headers:n,body:m(),signal:o,credentials:s?\`include\`:\`same-origin\`}):await this.performProgressRequest({body:m(),headers:n,method:r,onUploadProgress:i,resolvedUrl:a,signal:o,useSessionCookies:s});`;
-  const fetchReplacement =
+  const legacyFetchReplacement =
     `let f=i==null&&!codexLinuxProxyAuthEntry()?await ${electronVar}.net.fetch(a,{method:r,headers:n,body:m(),signal:o,credentials:s?\`include\`:\`same-origin\`}):await this.performProgressRequest({body:m(),headers:n,method:r,onUploadProgress:i,resolvedUrl:a,signal:o,useSessionCookies:s});`;
-  if (patchedSource.includes(fetchNeedle)) {
-    patchedSource = patchedSource.replace(fetchNeedle, fetchReplacement);
+  const currentFetchGate = new RegExp(
+    `if\\((${JS_IDENT})==null\\)(?=\\{let ${JS_IDENT}=\\{method:${JS_IDENT},headers:${JS_IDENT},` +
+      `body:${JS_IDENT}\\(\\),redirect:${JS_IDENT},signal:${JS_IDENT},credentials:${JS_IDENT}\\?` +
+      `${BT}include${BT}:${BT}same-origin${BT}\\};${JS_IDENT}=await ${electronVar}\\.net\\.fetch\\()`,
+  );
+  const patchedCurrentFetchGate = new RegExp(
+    `if\\(${JS_IDENT}==null&&!codexLinuxProxyAuthEntry\\(\\)\\)(?=\\{let ${JS_IDENT}=\\{method:${JS_IDENT},` +
+      `headers:${JS_IDENT},body:${JS_IDENT}\\(\\),redirect:${JS_IDENT},signal:${JS_IDENT},credentials:)`,
+  );
+  if (patchedSource.includes(legacyFetchNeedle)) {
+    patchedSource = patchedSource.replace(legacyFetchNeedle, legacyFetchReplacement);
+  } else if (currentFetchGate.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      currentFetchGate,
+      (_match, progressVar) => `if(${progressVar}==null&&!codexLinuxProxyAuthEntry())`,
+    );
   } else if (
-    patchedSource.includes("performDesktopFetch") &&
-    !patchedSource.includes("!codexLinuxProxyAuthEntry()?await")
+    patchedSource.includes(".net.fetch(") &&
+    patchedSource.includes("performProgressRequest") &&
+    !patchedSource.includes("!codexLinuxProxyAuthEntry()?await") &&
+    !patchedCurrentFetchGate.test(patchedSource)
   ) {
     console.warn(
       "WARN: Could not route Linux proxy-auth desktop fetches through ClientRequest",

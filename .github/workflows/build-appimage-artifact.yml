@@ -107,8 +107,19 @@ jobs:
             loadLinuxFeaturePatchDescriptors,
           } = require("./scripts/lib/linux-features.js");
 
+          const automaticFeatureIds = [
+            "mcp-helper-reaper",
+            "node-repl-reaper",
+            "directory-only-working-tree-watch",
+            "shared-app-server-socket",
+          ];
           const raw = process.env.REQUESTED_FEATURES ?? "";
-          const requested = raw.split(",").map((id) => id.trim()).filter(Boolean);
+          const useAutomaticProfile =
+            raw.trim() === "" && process.env.GITHUB_EVENT_NAME !== "workflow_dispatch";
+          const requestedInput = useAutomaticProfile
+            ? automaticFeatureIds.join(",")
+            : raw;
+          const requested = requestedInput.split(",").map((id) => id.trim()).filter(Boolean);
           const idPattern = /^[a-z0-9][a-z0-9-]*$/u;
           const invalid = requested.filter((id) => !idPattern.test(id));
           if (invalid.length > 0) {
@@ -146,7 +157,8 @@ jobs:
           );
           console.log(
             `Selected Linux features: ${resolved.join(", ") || "none"}; ` +
-            `ASAR patch descriptors: ${patchDescriptorCount}`,
+            `ASAR patch descriptors: ${patchDescriptorCount}; ` +
+            `profile=${useAutomaticProfile ? "automatic" : "requested"}`,
           );
           NODE
 

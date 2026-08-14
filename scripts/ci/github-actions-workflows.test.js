@@ -206,3 +206,15 @@ test("manual AppImage builds accept and validate an optional feature profile", (
   assert.match(workflow, /if: steps\.features\.outputs\.has_asar_patches != 'true'/);
   assert.match(workflow, /linux_features=/);
 });
+
+test("automatic AppImage builds use the approved compatible feature profile", () => {
+  const profile = "mcp-helper-reaper,node-repl-reaper,directory-only-working-tree-watch,shared-app-server-socket";
+  const workflow = read(".github/workflows/build-appimage-artifact.yml");
+  const sync = read(".github/workflows/sync-ready-upstream.yml");
+
+  for (const featureId of profile.split(",")) {
+    assert.match(workflow, new RegExp(`"${featureId}"`));
+  }
+  assert.match(workflow, /GITHUB_EVENT_NAME !== "workflow_dispatch"/);
+  assert.match(sync, new RegExp(`--field features='${profile}'`));
+});

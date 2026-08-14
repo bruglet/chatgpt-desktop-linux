@@ -22,15 +22,15 @@ jobs:
   sync-ready-upstream:
     name: Open Upstream Sync Pull Request
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Require a sync token that can trigger pull request checks
+      - name: Require a sync token that can update workflow files
         env:
           SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
         run: |
           if [ -z "$SYNC_TOKEN" ]; then
-            echo "Configure the UPSTREAM_SYNC_TOKEN repository secret with Contents and Pull requests write access." >&2
+            echo "Configure UPSTREAM_SYNC_TOKEN with Contents, Pull requests, and workflow write access." >&2
             echo "A separate token is required because pushes made by GITHUB_TOKEN do not trigger pull request workflows." >&2
             exit 1
           fi
@@ -41,36 +41,50 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
 
-      - name: Capture the current upstream DMG HTTP identity
-        id: dmg
-        env:
-          UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install signed-package resolution dependencies
         run: |
           set -euo pipefail
-          headers_file="$(mktemp)"
-          trap 'rm -f "$headers_file"' EXIT
-          curl --proto '=https' --tlsv1.2 -fsSLI --retry 3 "$UPSTREAM_DMG_URL" > "$headers_file"
-          last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
-          etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_file")"
-          content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
-          if [ -z "$etag" ] && { [ -z "$last_modified" ] || [ -z "$content_length" ]; }; then
-            echo "The DMG response did not provide a stable HTTP identity." >&2
-            exit 1
-          fi
-          http_key="$(printf '%s|%s|%s\n' "$last_modified" "$etag" "$content_length" | sha256sum | cut -d' ' -f1)"
-          {
-            echo "last_modified=$last_modified"
-            echo "etag=$etag"
-            echo "content_length=$content_length"
-            echo "http_key=$http_key"
-          } >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl dpkg-dev gnupg
+
+      - name: Resolve the current signed Linux package campaign
+        id: linux
+        run: |
+          set -euo pipefail
+          result_file="$RUNNER_TEMP/official-linux-release.json"
+          node scripts/automation/upstream-linux-package-watchdog/watchdog.js --json > "$result_file"
+          cat "$result_file"
+          node - "$result_file" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require("node:fs");
+          const [resultPath, outputPath] = process.argv.slice(2);
+          const release = JSON.parse(fs.readFileSync(resultPath, "utf8")).release;
+          if (!release || !/^[0-9a-f]{64}$/.test(release.releaseId)) {
+            throw new Error("signed Linux package watchdog returned no valid release identity");
+          }
+          const lines = [
+            `release_id=${release.releaseId}`,
+            `version=${release.version}`,
+            `amd64_repository_path=${release.packages?.amd64?.repositoryPath}`,
+            `amd64_sha256=${release.packages?.amd64?.sha256}`,
+            `arm64_repository_path=${release.packages?.arm64?.repositoryPath}`,
+            `arm64_sha256=${release.packages?.arm64?.sha256}`,
+          ];
+          if (lines.some((line) => line.endsWith("=undefined"))) {
+            throw new Error("signed Linux package watchdog returned incomplete package metadata");
+          }
+          fs.appendFileSync(outputPath, `${lines.join("\n")}\n`);
+          NODE
 
       - name: Find the accepted upstream head
         id: upstream
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
-          DMG_LAST_MODIFIED: ${{ steps.dmg.outputs.last_modified }}
-          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
+          OFFICIAL_RELEASE_ID: ${{ steps.linux.outputs.release_id }}
         with:
           script: |
             const [owner, repo] = process.env.UPSTREAM_REPOSITORY.split('/');
@@ -89,17 +103,13 @@ jobs:
               status: 'completed',
               per_page: 50,
             });
-            const dmgChangedAt = Date.parse(process.env.DMG_LAST_MODIFIED);
-            const acceptedRun = data.workflow_runs.find((run) => {
-              const runStartedAt = Date.parse(run.run_started_at || run.created_at);
-              return run.head_sha === headSha &&
-                run.conclusion === 'success' &&
-                ['push', 'schedule'].includes(run.event) &&
-                run.head_repository?.full_name === process.env.UPSTREAM_REPOSITORY &&
-                Number.isFinite(dmgChangedAt) && runStartedAt >= dmgChangedAt;
-            });
+            const acceptedRun = data.workflow_runs.find((run) =>
+              run.head_sha === headSha &&
+              run.conclusion === 'success' &&
+              ['push', 'workflow_dispatch'].includes(run.event) &&
+              run.head_repository?.full_name === process.env.UPSTREAM_REPOSITORY);
             if (!acceptedRun) {
-              core.notice(`Upstream ${headSha} does not yet have a successful acceptance run.`);
+              core.notice(`Upstream ${headSha} does not yet have a successful official Linux build.`);
               core.setOutput('ready', 'false');
               return;
             }
@@ -112,7 +122,7 @@ jobs:
               repo: context.repo.repo,
               per_page: 100,
             });
-            const marker = `<!-- upstream-dmg-http-key:${process.env.DMG_HTTP_KEY} -->`;
+            const marker = `<!-- official-linux-release:${process.env.OFFICIAL_RELEASE_ID} -->`;
             core.setOutput('released', releases.some((release) => release.body?.includes(marker)) ? 'true' : 'false');
 
       - name: Fetch the accepted upstream revision
@@ -168,12 +178,13 @@ jobs:
             if (!pull) {
               const body = [
                 `Synchronizes the fork with upstream commit \`${process.env.UPSTREAM_SHA}\` after the`,
-                'upstream DMG acceptance workflow succeeded.',
+                'upstream official Linux package workflow succeeded.',
                 '',
-                `Acceptance run: ${process.env.ACCEPTANCE_RUN_URL}`,
+                `Official Linux campaign: \`${process.env.OFFICIAL_RELEASE_ID}\``,
+                `Validation run: ${process.env.ACCEPTANCE_RUN_URL}`,
                 '',
                 `<!-- automated-upstream-sync:${process.env.UPSTREAM_SHA} -->`,
-                `<!-- upstream-dmg-http-key:${process.env.DMG_HTTP_KEY} -->`,
+                `<!-- official-linux-release:${process.env.OFFICIAL_RELEASE_ID} -->`,
               ].join('\n');
               ({ data: pull } = await github.rest.pulls.create({
                 owner,
@@ -187,15 +198,16 @@ jobs:
             core.setOutput('url', pull.html_url);
         env:
           ACCEPTANCE_RUN_URL: ${{ steps.upstream.outputs.run_url }}
+          OFFICIAL_RELEASE_ID: ${{ steps.linux.outputs.release_id }}
           UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
           UPSTREAM_SHORT_SHA: ${{ steps.upstream.outputs.short_sha }}
-          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
 
       - name: Enable auto-merge
         if: steps.upstream.outputs.ready == 'true' && steps.synchronized.outputs.already != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ACCEPTANCE_RUN_URL: ${{ steps.upstream.outputs.run_url }}
+          OFFICIAL_RELEASE_ID: ${{ steps.linux.outputs.release_id }}
           UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
           PR_URL: ${{ steps.sync_pr.outputs.url }}
         run: |
@@ -205,7 +217,8 @@ jobs:
             echo "## Accepted upstream revision"
             echo
             echo "- Commit: \`$UPSTREAM_SHA\`"
-            echo "- Acceptance: $ACCEPTANCE_RUN_URL"
+            echo "- Official Linux campaign: \`$OFFICIAL_RELEASE_ID\`"
+            echo "- Validation: $ACCEPTANCE_RUN_URL"
             echo "- Pull request: $PR_URL"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -222,10 +235,15 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref "${{ github.event.repository.default_branch }}" \
             --field publish_release=true \
-            --field expected_dmg_http_key="${{ steps.dmg.outputs.http_key }}"
+            --field release_id="${{ steps.linux.outputs.release_id }}" \
+            --field version="${{ steps.linux.outputs.version }}" \
+            --field amd64_repository_path="${{ steps.linux.outputs.amd64_repository_path }}" \
+            --field amd64_sha256="${{ steps.linux.outputs.amd64_sha256 }}" \
+            --field arm64_repository_path="${{ steps.linux.outputs.arm64_repository_path }}" \
+            --field arm64_sha256="${{ steps.linux.outputs.arm64_sha256 }}"
           {
             echo "## AppImage release dispatched"
             echo
             echo "- Upstream commit: \`${{ steps.upstream.outputs.sha }}\`"
-            echo "- DMG HTTP identity: \`${{ steps.dmg.outputs.http_key }}\`"
+            echo "- Official Linux campaign: \`${{ steps.linux.outputs.release_id }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

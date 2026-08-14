@@ -1,4 +1,5 @@
 name: Build AppImage Artifact
+run-name: AppImage ${{ inputs.release_id || github.sha }}
 
 on:
   workflow_dispatch:
@@ -8,8 +9,28 @@ on:
         type: boolean
         required: true
         default: false
-      expected_dmg_http_key:
-        description: Expected stable HTTP identity from the upstream watcher
+      release_id:
+        description: Exact signed Linux package campaign identity
+        type: string
+        required: false
+      version:
+        description: Expected signed Linux package version
+        type: string
+        required: false
+      amd64_repository_path:
+        description: Expected signed amd64 package path
+        type: string
+        required: false
+      amd64_sha256:
+        description: Expected signed amd64 package SHA-256
+        type: string
+        required: false
+      arm64_repository_path:
+        description: Expected signed arm64 package path
+        type: string
+        required: false
+      arm64_sha256:
+        description: Expected signed arm64 package SHA-256
         type: string
         required: false
   pull_request:
@@ -37,10 +58,11 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Check out selected fork revision
+      - name: Check out the selected fork revision
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -51,13 +73,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ca-certificates curl g++ make p7zip-full python3 tar unzip
-
-      - name: Verify Rust toolchain
-        run: |
-          set -euo pipefail
-          rustc --version
-          cargo --version
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl dpkg-dev gnupg make python3
 
       - name: Download appimagetool
         id: appimagetool
@@ -71,94 +88,120 @@ jobs:
           test -s "$tool_path"
           echo "path=$tool_path" >> "$GITHUB_OUTPUT"
 
-      - name: Download and fingerprint the current upstream DMG
-        id: dmg
+      - name: Resolve and bind the signed Linux package campaign
+        id: upstream
         env:
-          UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
-          EXPECTED_DMG_HTTP_KEY: ${{ inputs.expected_dmg_http_key }}
+          EXPECTED_RELEASE_ID: ${{ inputs.release_id }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_AMD64_PATH: ${{ inputs.amd64_repository_path }}
+          EXPECTED_AMD64_SHA256: ${{ inputs.amd64_sha256 }}
+          EXPECTED_ARM64_PATH: ${{ inputs.arm64_repository_path }}
+          EXPECTED_ARM64_SHA256: ${{ inputs.arm64_sha256 }}
         run: |
           set -euo pipefail
-          headers_before="$(mktemp)"
-          headers_after="$(mktemp)"
-          trap 'rm -f "$headers_before" "$headers_after"' EXIT
-          capture_identity() {
-            local headers_file="$1"
-            curl --proto '=https' --tlsv1.2 -fsSLI --retry 3 "$UPSTREAM_DMG_URL" > "$headers_file"
-            local last_modified etag content_length
-            last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
-            etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_file")"
-            content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
-            if [ -z "$etag" ] && { [ -z "$last_modified" ] || [ -z "$content_length" ]; }; then
-              echo "The DMG response did not provide a stable HTTP identity." >&2
-              return 1
-            fi
-            printf '%s|%s|%s\n' "$last_modified" "$etag" "$content_length" | sha256sum | cut -d' ' -f1
+          mkdir -p upstream/amd64
+          release_file="$RUNNER_TEMP/official-linux-release.json"
+          node scripts/automation/upstream-linux-package-watchdog/watchdog.js --json > "$release_file"
+          cat "$release_file"
+          node - "$release_file" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require("node:fs");
+          const [releasePath, outputPath] = process.argv.slice(2);
+          const value = JSON.parse(fs.readFileSync(releasePath, "utf8"));
+          const release = value.release;
+          const expected = {
+            releaseId: process.env.EXPECTED_RELEASE_ID,
+            version: process.env.EXPECTED_VERSION,
+            amd64Path: process.env.EXPECTED_AMD64_PATH,
+            amd64Sha: process.env.EXPECTED_AMD64_SHA256,
+            arm64Path: process.env.EXPECTED_ARM64_PATH,
+            arm64Sha: process.env.EXPECTED_ARM64_SHA256,
+          };
+          if (!release || !/^[0-9a-f]{64}$/.test(release.releaseId)) {
+            throw new Error("signed Linux package watchdog returned no valid release identity");
           }
-          http_key_before="$(capture_identity "$headers_before")"
-          if [ -n "$EXPECTED_DMG_HTTP_KEY" ] && [ "$http_key_before" != "$EXPECTED_DMG_HTTP_KEY" ]; then
-            echo "The upstream DMG changed after the accepted watcher observation." >&2
-            exit 1
-          fi
-          dmg_path="$RUNNER_TEMP/Codex.dmg"
-          curl --proto '=https' --tlsv1.2 -fL --retry 3 -o "$dmg_path" "$UPSTREAM_DMG_URL"
-          http_key_after="$(capture_identity "$headers_after")"
-          if [ "$http_key_before" != "$http_key_after" ]; then
-            echo "The upstream DMG HTTP identity changed during download." >&2
-            exit 1
-          fi
-          dmg_sha256="$(sha256sum "$dmg_path" | cut -d' ' -f1)"
-          dmg_size_bytes="$(stat -c '%s' "$dmg_path")"
-          tested_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_after")"
-          etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/\"/,""); print; exit}' "$headers_after")"
-          content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_after")"
-          cat > upstream-dmg-metadata.json <<JSON
-          {
-            "url": "$UPSTREAM_DMG_URL",
-            "path": "$dmg_path",
-            "last_modified": "$last_modified",
-            "etag": "$etag",
-            "content_length": "$content_length",
-            "http_identity_key": "$http_key_after",
-            "sha256": "$dmg_sha256",
-            "size_bytes": "$dmg_size_bytes",
-            "tested_at_utc": "$tested_at_utc"
+          const provided = Object.values(expected).filter(Boolean).length;
+          if (provided !== 0 && provided !== Object.keys(expected).length) {
+            throw new Error("all signed Linux campaign inputs must be provided together");
           }
-          JSON
-          echo "path=$dmg_path" >> "$GITHUB_OUTPUT"
-          echo "http_key=$http_key_after" >> "$GITHUB_OUTPUT"
-          echo "sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
-          echo "release_tag=chatgpt-dmg-$dmg_sha256" >> "$GITHUB_OUTPUT"
+          const actual = {
+            releaseId: release.releaseId,
+            version: release.version,
+            amd64Path: release.packages?.amd64?.repositoryPath,
+            amd64Sha: release.packages?.amd64?.sha256,
+            arm64Path: release.packages?.arm64?.repositoryPath,
+            arm64Sha: release.packages?.arm64?.sha256,
+          };
+          if (provided !== 0 && Object.keys(expected).some((key) => expected[key] !== actual[key])) {
+            throw new Error(`signed Linux package campaign changed: ${JSON.stringify({ expected, actual })}`);
+          }
+          const lines = [
+            `release_id=${actual.releaseId}`,
+            `version=${actual.version}`,
+            `amd64_repository_path=${actual.amd64Path}`,
+            `amd64_sha256=${actual.amd64Sha}`,
+            `arm64_repository_path=${actual.arm64Path}`,
+            `arm64_sha256=${actual.arm64Sha}`,
+          ];
+          fs.appendFileSync(outputPath, `${lines.join("\n")}\n`);
+          fs.copyFileSync(releasePath, "upstream-linux-release.json");
+          NODE
 
-      - name: Build and accept app from the fingerprinted DMG
+          package_path="$(node scripts/lib/upstream-linux-package.js \
+            --output-dir upstream/amd64 \
+            --metadata upstream/amd64.json \
+            --key-base64 assets/openai-codex-linux-repository-key.gpg.base64 \
+            --arch amd64)"
+          node - "upstream/amd64.json" "upstream-linux-release.json" <<'NODE'
+          const fs = require("node:fs");
+          const [metadataPath, releasePath] = process.argv.slice(2);
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+          const release = JSON.parse(fs.readFileSync(releasePath, "utf8")).release;
+          const expected = release?.packages?.amd64;
+          for (const [label, actual, wanted] of [
+            ["version", metadata.version, release.version],
+            ["repository path", metadata.repositoryPath, expected?.repositoryPath],
+            ["SHA-256", metadata.sha256, expected?.sha256],
+          ]) {
+            if (actual !== wanted) throw new Error(`signed amd64 package ${label} changed during resolution`);
+          }
+          NODE
+          echo "package=$package_path" >> "$GITHUB_OUTPUT"
+
+      - name: Build the community app from the verified package
         env:
-          CODEX_ACCEPTANCE_DECISION_JSON: ${{ github.workspace }}/upstream-dmg-decision.json
-          CODEX_ACCEPTANCE_OVERRIDE: '0'
-          CODEX_ACCEPTANCE_SOURCE: github-actions-appimage-release
-          CODEX_UPSTREAM_DMG_METADATA_JSON: ${{ github.workspace }}/upstream-dmg-metadata.json
-          REBUILD_REPORT_DIR: ${{ github.workspace }}/upstream-acceptance
-        run: make build-app DMG="${{ steps.dmg.outputs.path }}"
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/features.example.json
+          CODEX_TARGET_ARCH: amd64
+          CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app
+          PACKAGE_WITH_UPDATER: '0'
+          UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
+        run: make build-app
 
-      - name: Enforce the shared upstream DMG acceptance decision
-        id: acceptance
+      - name: Verify the clean app preserves the official ASAR
+        env:
+          UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
         run: |
           set -euo pipefail
-          test -f upstream-dmg-decision.json
-          verdict="$(node -e 'console.log(require("./upstream-dmg-decision.json").verdict)')"
-          case "$verdict" in
-            accepted|accepted_with_warnings) ;;
-            *) echo "Upstream DMG verdict: $verdict" >&2; exit 1 ;;
-          esac
-          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          upstream_root="$RUNNER_TEMP/upstream-package"
+          mkdir -p "$upstream_root"
+          dpkg-deb -x "$UPSTREAM_DEB" "$upstream_root"
+          cmp "$upstream_root/usr/lib/chatgpt/resources/app.asar" \
+            codex-app/resources/app.asar
+          test -x codex-app/ChatGPT
+          test -x codex-app/resources/codex
 
       - name: Build AppImage
         env:
-          APPIMAGE_EXTRACT_AND_RUN: "1"
+          APPIMAGE_EXTRACT_AND_RUN: '1'
           APPIMAGETOOL: ${{ steps.appimagetool.outputs.path }}
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
         run: make appimage
 
       - name: Validate AppImage and write build metadata
         id: artifact
+        env:
+          OFFICIAL_RELEASE_ID: ${{ steps.upstream.outputs.release_id }}
+          OFFICIAL_VERSION: ${{ steps.upstream.outputs.version }}
+          OFFICIAL_AMD64_SHA256: ${{ steps.upstream.outputs.amd64_sha256 }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -189,14 +232,16 @@ jobs:
             echo "Expected exactly one packaged launcher, found ${#packaged_launchers[@]}" >&2
             exit 1
           fi
+
           sha256sum "$appimage" > dist/SHA256SUMS
           artifact_name="$(basename "$appimage")"
           {
             echo "repository=$GITHUB_REPOSITORY"
             echo "commit=$GITHUB_SHA"
             echo "upstream=https://github.com/ilysenko/codex-desktop-linux"
-            echo "upstream_dmg_sha256=${{ steps.dmg.outputs.sha256 }}"
-            echo "acceptance_verdict=${{ steps.acceptance.outputs.verdict }}"
+            echo "upstream_linux_release_id=$OFFICIAL_RELEASE_ID"
+            echo "upstream_linux_version=$OFFICIAL_VERSION"
+            echo "upstream_linux_amd64_sha256=$OFFICIAL_AMD64_SHA256"
             echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "built_at_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "artifact=$artifact_name"
@@ -207,7 +252,8 @@ jobs:
             echo "## AppImage artifact"
             echo
             echo "- File: \`$artifact_name\`"
-            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Official Linux version: \`$OFFICIAL_VERSION\`"
+            echo "- Signed release ID: \`$OFFICIAL_RELEASE_ID\`"
             echo "- SHA-256: \`$(cut -d' ' -f1 dist/SHA256SUMS)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -219,6 +265,7 @@ jobs:
             ${{ steps.artifact.outputs.appimage }}
             dist/SHA256SUMS
             dist/BUILD-INFO.txt
+            upstream-linux-release.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -227,11 +274,11 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.dmg.outputs.release_tag }}
+          RELEASE_TAG: chatgpt-linux-${{ steps.upstream.outputs.release_id }}
           APPIMAGE_PATH: ${{ steps.artifact.outputs.appimage }}
-          DMG_SHA256: ${{ steps.dmg.outputs.sha256 }}
-          ACCEPTANCE_VERDICT: ${{ steps.acceptance.outputs.verdict }}
-          DMG_HTTP_KEY: ${{ steps.dmg.outputs.http_key }}
+          OFFICIAL_RELEASE_ID: ${{ steps.upstream.outputs.release_id }}
+          OFFICIAL_VERSION: ${{ steps.upstream.outputs.version }}
+          OFFICIAL_AMD64_SHA256: ${{ steps.upstream.outputs.amd64_sha256 }}
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -241,21 +288,20 @@ jobs:
           notes_file="$(mktemp)"
           trap 'rm -f "$notes_file"' EXIT
           cat > "$notes_file" <<EOF
-          Automated AppImage built from an upstream revision whose current OpenAI
-          DMG passed the repository acceptance profile.
+          Automated AppImage built from the OpenAI signed Linux package.
 
           - Fork commit: \`$GITHUB_SHA\`
-          - Upstream DMG SHA-256: \`$DMG_SHA256\`
-          - Acceptance verdict: \`$ACCEPTANCE_VERDICT\`
+          - Official Linux version: \`$OFFICIAL_VERSION\`
+          - Signed release ID: \`$OFFICIAL_RELEASE_ID\`
+          - amd64 package SHA-256: \`$OFFICIAL_AMD64_SHA256\`
 
-          <!-- upstream-dmg-http-key:$DMG_HTTP_KEY -->
+          <!-- official-linux-release:$OFFICIAL_RELEASE_ID -->
           EOF
           gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             "$APPIMAGE_PATH" \
             dist/SHA256SUMS \
             dist/BUILD-INFO.txt \
-            upstream-dmg-metadata.json \
-            upstream-dmg-decision.json \
+            upstream-linux-release.json \
             --title "$(basename "$APPIMAGE_PATH" .AppImage)" \
             --notes-file "$notes_file"

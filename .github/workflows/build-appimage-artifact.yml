@@ -9,6 +9,11 @@ on:
         type: boolean
         required: true
         default: false
+      features:
+        description: Comma-separated Linux feature IDs to include in the AppImage
+        type: string
+        required: false
+        default: ''
       release_id:
         description: Exact signed Linux package campaign identity
         type: string
@@ -55,7 +60,7 @@ jobs:
        github.event.pull_request.head.ref == 'automation/upstream-sync' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
 
     steps:
       - name: Check out the selected fork revision
@@ -87,6 +92,63 @@ jobs:
           chmod 0755 "$tool_path"
           test -s "$tool_path"
           echo "path=$tool_path" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve selected Linux features
+        id: features
+        env:
+          REQUESTED_FEATURES: ${{ inputs.features }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const { loadEnabledLinuxFeatures } = require("./scripts/lib/linux-features.js");
+
+          const raw = process.env.REQUESTED_FEATURES ?? "";
+          const requested = raw.split(",").map((id) => id.trim()).filter(Boolean);
+          const idPattern = /^[a-z0-9][a-z0-9-]*$/u;
+          const invalid = requested.filter((id) => !idPattern.test(id));
+          if (invalid.length > 0) {
+            throw new Error(`Invalid Linux feature id(s): ${invalid.join(", ")}`);
+          }
+          const duplicates = requested.filter((id, index) => requested.indexOf(id) !== index);
+          if (duplicates.length > 0) {
+            throw new Error(`Duplicate Linux feature id(s): ${[...new Set(duplicates)].join(", ")}`);
+          }
+
+          const configPath = path.join(process.env.GITHUB_WORKSPACE, "linux-features", "workflow-features.json");
+          fs.writeFileSync(configPath, `${JSON.stringify({ enabled: requested }, null, 2)}\n`);
+          const resolved = loadEnabledLinuxFeatures({ featuresConfigPath: configPath }).map(({ id }) => id);
+          if (resolved.length !== requested.length || resolved.some((id, index) => id !== requested[index])) {
+            throw new Error(`Requested Linux features did not resolve exactly: ${JSON.stringify({ requested, resolved })}`);
+          }
+          fs.writeFileSync(configPath, `${JSON.stringify({ enabled: resolved }, null, 2)}\n`);
+
+          const nativeHelperIds = new Set([
+            "computer-use-linux",
+            "global-dictation",
+            "mcp-helper-reaper",
+            "read-aloud-mcp",
+            "record-and-replay",
+          ]);
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `needs_native_helpers=${resolved.some((id) => nativeHelperIds.has(id))}\n`,
+          );
+          console.log(`Selected Linux features: ${resolved.join(", ") || "none"}`);
+          NODE
+
+      - name: Set up Rust for selected native features
+        if: steps.features.outputs.needs_native_helpers == 'true'
+        uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0
+        with:
+          toolchain: stable
+
+      - name: Install native feature build dependencies
+        if: steps.features.outputs.needs_native_helpers == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends libwayland-dev pkg-config
 
       - name: Resolve and bind the signed Linux package campaign
         id: upstream
@@ -167,9 +229,15 @@ jobs:
           NODE
           echo "package=$package_path" >> "$GITHUB_OUTPUT"
 
+      - name: Build native helper binaries for selected features
+        if: steps.features.outputs.needs_native_helpers == 'true'
+        env:
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/workflow-features.json
+        run: make build-native-feature-helpers
+
       - name: Build the community app from the verified package
         env:
-          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/features.example.json
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/workflow-features.json
           CODEX_TARGET_ARCH: amd64
           CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app
           PACKAGE_WITH_UPDATER: '0'
@@ -177,6 +245,23 @@ jobs:
         # Keep UPSTREAM_DEB available as a Make variable, but do not export it
         # to install.sh, which also receives the package path positionally.
         run: make --eval='unexport UPSTREAM_DEB' build-app
+
+      - name: Verify the selected feature snapshot
+        env:
+          FEATURE_CONFIG_PATH: ${{ github.workspace }}/linux-features/workflow-features.json
+          BUILD_INFO_PATH: ${{ github.workspace }}/codex-app/.codex-linux/build-info.json
+        run: |
+          set -euo pipefail
+          node - "$FEATURE_CONFIG_PATH" "$BUILD_INFO_PATH" <<'NODE'
+          const fs = require("node:fs");
+          const [configPath, buildInfoPath] = process.argv.slice(2);
+          const expected = JSON.parse(fs.readFileSync(configPath, "utf8")).enabled;
+          const actual = JSON.parse(fs.readFileSync(buildInfoPath, "utf8")).linuxFeatures?.enabled;
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Packaged feature snapshot mismatch: ${JSON.stringify({ expected, actual })}`);
+          }
+          console.log(`Packaged Linux features: ${expected.join(", ") || "none"}`);
+          NODE
 
       - name: Verify the clean app preserves the official ASAR
         env:
@@ -204,6 +289,7 @@ jobs:
           OFFICIAL_RELEASE_ID: ${{ steps.upstream.outputs.release_id }}
           OFFICIAL_VERSION: ${{ steps.upstream.outputs.version }}
           OFFICIAL_AMD64_SHA256: ${{ steps.upstream.outputs.amd64_sha256 }}
+          FEATURE_CONFIG_PATH: ${{ github.workspace }}/linux-features/workflow-features.json
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -237,6 +323,12 @@ jobs:
 
           sha256sum "$appimage" > dist/SHA256SUMS
           artifact_name="$(basename "$appimage")"
+          feature_ids="$(node - "$FEATURE_CONFIG_PATH" <<'NODE'
+          const fs = require("node:fs");
+          const enabled = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).enabled ?? [];
+          process.stdout.write(enabled.join(","));
+          NODE
+          )"
           {
             echo "repository=$GITHUB_REPOSITORY"
             echo "commit=$GITHUB_SHA"
@@ -247,6 +339,7 @@ jobs:
             echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "built_at_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "artifact=$artifact_name"
+            echo "linux_features=${feature_ids:-none}"
           } > dist/BUILD-INFO.txt
 
           echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
@@ -257,6 +350,7 @@ jobs:
             echo "- Official Linux version: \`$OFFICIAL_VERSION\`"
             echo "- Signed release ID: \`$OFFICIAL_RELEASE_ID\`"
             echo "- SHA-256: \`$(cut -d' ' -f1 dist/SHA256SUMS)\`"
+            echo "- Linux features: \`${feature_ids:-none}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload AppImage artifact

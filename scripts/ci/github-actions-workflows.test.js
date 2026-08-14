@@ -188,3 +188,18 @@ test("manual official Linux validation accepts an exact campaign", () => {
   assert.match(packageMatrix, /package matrix input does not match the dispatched campaign/);
   assert.match(packageMatrix, /\.\/install\.sh "\$\{\{ steps\.upstream\.outputs\.package \}\}"/);
 });
+
+test("manual AppImage builds accept and validate an optional feature profile", () => {
+  const workflow = read(".github/workflows/build-appimage-artifact.yml");
+  assert.match(workflow, /^      features:\n/m);
+  assert.match(workflow, /description: Comma-separated Linux feature IDs to include in the AppImage/);
+  assert.match(workflow, /id: features/);
+  assert.match(workflow, /loadEnabledLinuxFeatures/);
+  assert.match(workflow, /Invalid Linux feature id/);
+  assert.match(workflow, /needs_native_helpers/);
+  assert.match(workflow, /dtolnay\/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0/);
+  assert.match(workflow, /run: make build-native-feature-helpers/);
+  assert.match(workflow, /linux-features\/workflow-features\.json/);
+  assert.match(workflow, /Verify the selected feature snapshot/);
+  assert.match(workflow, /linux_features=/);
+});

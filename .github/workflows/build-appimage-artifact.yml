@@ -174,7 +174,9 @@ jobs:
           CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app
           PACKAGE_WITH_UPDATER: '0'
           UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
-        run: make build-app
+        # Keep UPSTREAM_DEB available as a Make variable, but do not export it
+        # to install.sh, which also receives the package path positionally.
+        run: make --eval='unexport UPSTREAM_DEB' build-app
 
       - name: Verify the clean app preserves the official ASAR
         env:

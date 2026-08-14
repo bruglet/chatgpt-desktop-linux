@@ -195,11 +195,14 @@ test("manual AppImage builds accept and validate an optional feature profile", (
   assert.match(workflow, /description: Comma-separated Linux feature IDs to include in the AppImage/);
   assert.match(workflow, /id: features/);
   assert.match(workflow, /loadEnabledLinuxFeatures/);
+  assert.match(workflow, /loadLinuxFeaturePatchDescriptors/);
   assert.match(workflow, /Invalid Linux feature id/);
   assert.match(workflow, /needs_native_helpers/);
+  assert.match(workflow, /has_asar_patches/);
   assert.match(workflow, /dtolnay\/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0/);
   assert.match(workflow, /run: make build-native-feature-helpers/);
   assert.match(workflow, /linux-features\/workflow-features\.json/);
   assert.match(workflow, /Verify the selected feature snapshot/);
+  assert.match(workflow, /if: steps\.features\.outputs\.has_asar_patches != 'true'/);
   assert.match(workflow, /linux_features=/);
 });

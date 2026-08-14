@@ -102,7 +102,10 @@ jobs:
           node - <<'NODE'
           const fs = require("node:fs");
           const path = require("node:path");
-          const { loadEnabledLinuxFeatures } = require("./scripts/lib/linux-features.js");
+          const {
+            loadEnabledLinuxFeatures,
+            loadLinuxFeaturePatchDescriptors,
+          } = require("./scripts/lib/linux-features.js");
 
           const raw = process.env.REQUESTED_FEATURES ?? "";
           const requested = raw.split(",").map((id) => id.trim()).filter(Boolean);
@@ -123,6 +126,9 @@ jobs:
             throw new Error(`Requested Linux features did not resolve exactly: ${JSON.stringify({ requested, resolved })}`);
           }
           fs.writeFileSync(configPath, `${JSON.stringify({ enabled: resolved }, null, 2)}\n`);
+          const patchDescriptorCount = loadLinuxFeaturePatchDescriptors({
+            featuresConfigPath: configPath,
+          }).length;
 
           const nativeHelperIds = new Set([
             "computer-use-linux",
@@ -133,9 +139,15 @@ jobs:
           ]);
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
-            `needs_native_helpers=${resolved.some((id) => nativeHelperIds.has(id))}\n`,
+            [
+              `needs_native_helpers=${resolved.some((id) => nativeHelperIds.has(id))}`,
+              `has_asar_patches=${patchDescriptorCount > 0}`,
+            ].join("\n") + "\n",
           );
-          console.log(`Selected Linux features: ${resolved.join(", ") || "none"}`);
+          console.log(
+            `Selected Linux features: ${resolved.join(", ") || "none"}; ` +
+            `ASAR patch descriptors: ${patchDescriptorCount}`,
+          );
           NODE
 
       - name: Set up Rust for selected native features
@@ -264,6 +276,9 @@ jobs:
           NODE
 
       - name: Verify the clean app preserves the official ASAR
+        # Feature profiles intentionally repack app.asar; byte identity is the
+        # invariant only when no ASAR patch descriptors are enabled.
+        if: steps.features.outputs.has_asar_patches != 'true'
         env:
           UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
         run: |

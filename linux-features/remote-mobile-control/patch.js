@@ -45,6 +45,12 @@ const REMOTE_CONTROL_REVOKE_SETUP_RESET_MARKER = "codexLinuxRemoteControlResetMo
 const REMOTE_CONTROL_VISIBILITY_MARKER = "codexLinuxRemoteControlVisibilityEnabled";
 const REMOTE_CONTROL_COPY_MARKER = "codexLinuxRemoteControlCopy";
 const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileLocalAppServerArgs";
+
+// The current signed Linux bundle no longer contains the contracts targeted by
+// these patches. Keep the descriptors available for retargeting, but do not
+// apply them until they have been updated and verified against a new bundle.
+const DISABLED_UNTIL_UPSTREAM_RETARGETED = () => false;
+
 const REMOTE_MOBILE_APP_SERVER_BASE_ARGS_NEEDLE = "[`-c`,`features.code_mode_host=true`]";
 const REMOTE_MOBILE_APP_SERVER_LAUNCH_TAIL = "`app-server`,`--analytics-default-enabled`]}";
 const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_HELPER =
@@ -1387,6 +1393,7 @@ module.exports = [
     pattern: /^remote-connections-settings-.*\.js$/,
     order: 20_135,
     ciPolicy: "optional",
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "remote connections settings bundle",
     skipDescription: "Linux remote-control settings UX patch",
     apply: applyLinuxRemoteControlSettingsUxPatch,
@@ -1407,6 +1414,7 @@ module.exports = [
     pattern: /^remote-connections-settings-.*\.js$/,
     order: 20_140,
     ciPolicy: "optional",
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "remote connections settings bundle",
     skipDescription: "Linux remote-connections refresh patch",
     apply: applyLinuxRemoteConnectionsRefreshPatch,
@@ -1437,6 +1445,7 @@ module.exports = [
     pattern: REMOTE_CONTROL_APP_INITIAL_ASSET_PATTERN,
     order: 20_151,
     ciPolicy: "optional",
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "app-server conversation manager bundle",
     skipDescription: "Linux remote-mobile completed item recovery patch",
     apply: applyLinuxRemoteMobileCompletedItemRecoveryPatch,

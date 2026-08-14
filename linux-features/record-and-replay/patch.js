@@ -8,6 +8,11 @@ const RECORD_REPLAY_MODULE_EXPRESSIONS = Object.freeze({
   pathVar: 'require("node:path")',
 });
 
+// The current signed Linux bundle no longer contains the contract targeted by
+// this patch. Keep the descriptor available for retargeting, but do not apply
+// it until it has been updated and verified against a new bundle.
+const DISABLED_UNTIL_UPSTREAM_RETARGETED = () => false;
+
 function warn(message, patchName) {
   console.warn(`WARN: ${message} - skipping ${patchName}`);
 }
@@ -476,6 +481,7 @@ const descriptors = [
     ciPolicy: "optional",
     pattern: /^app-initial-[A-Za-z0-9_-]+\.js$/,
     assetMatch: hasRecordReplayDictationTranscriptContract,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "composer dictation bundle",
     skipDescription: "Record & Replay dictation transcript patch",
     apply: applyRecordReplayDictationTranscriptPatch,

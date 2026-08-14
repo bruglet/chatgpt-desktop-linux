@@ -983,6 +983,24 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
       "webview-asset",
     ]);
 
+    const disabledUntilRetargeted = new Set([
+      "feature:remote-mobile-control:linux-remote-control-settings-ux",
+      "feature:remote-mobile-control:linux-remote-connections-refresh",
+      "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery",
+    ]);
+    assert.deepEqual(
+      descriptors
+        .filter((descriptor) => disabledUntilRetargeted.has(descriptor.id))
+        .map((descriptor) => descriptor.id)
+        .sort(),
+      [...disabledUntilRetargeted].sort(),
+    );
+    assert.ok(
+      descriptors
+        .filter((descriptor) => disabledUntilRetargeted.has(descriptor.id))
+        .every((descriptor) => descriptor.enabled({}) === false),
+    );
+
     const visibilityDescriptor = descriptors.find((descriptor) =>
       descriptor.id === "feature:remote-mobile-control:linux-remote-control-visibility"
     );
@@ -2620,7 +2638,7 @@ test("Linux remote-control settings UX patch warns when SSH release handling dri
   assert.ok(warnings.some((warning) => warning.includes("SSH install release needles")));
 });
 
-test("remote mobile feature patch report records feature metadata and partial warnings", () => {
+test("remote mobile feature patch report records feature metadata, disabled patches, and partial warnings", () => {
   withTempFeatureRoot(["remote-mobile-control"], (root) => {
     const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-report-"));
     try {
@@ -2691,8 +2709,7 @@ test("remote mobile feature patch report records feature metadata and partial wa
       );
       assert.equal(settingsPatch.sourceKind, "feature");
       assert.equal(settingsPatch.featureId, "remote-mobile-control");
-      assert.equal(settingsPatch.status, "applied-with-warnings");
-      assert.ok(settingsPatch.warnings.some((warning) => warning.includes("SSH install release needles")));
+      assert.equal(settingsPatch.status, "skipped-disabled");
 
       const enablementBridgePatch = report.patches.find(
         (patch) =>
@@ -2723,7 +2740,7 @@ test("remote mobile feature patch report records feature metadata and partial wa
       );
       assert.equal(completedItemPatch.sourceKind, "feature");
       assert.equal(completedItemPatch.featureId, "remote-mobile-control");
-      assert.equal(completedItemPatch.status, "applied");
+      assert.equal(completedItemPatch.status, "skipped-disabled");
       assert.equal(
         report.patches.some((patch) => patch.name === "linux-completed-item-recovery"),
         false,
@@ -3708,17 +3725,17 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.match(patchedRemoteConnectionVisibilityFile, /codexLinuxRemoteControlLoadGateEnabled/);
         assert.match(patchedAppMainFile, /\{\.\.\.e,remote_control:!0\}/);
         assert.match(patchedVisibilityFile, /navigator\.userAgent\.includes\(`Linux`\)/);
-        assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlOutboundTabGate/);
+        assert.doesNotMatch(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlOutboundTabGate/);
         assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlResetMobileSetupAfterRevoke/);
-        assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteConnectionsRefreshNow/);
-        assert.match(patchedRemoteConnectionsSettingsFile, /Qn=5e3/);
+        assert.doesNotMatch(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteConnectionsRefreshNow/);
+        assert.doesNotMatch(patchedRemoteConnectionsSettingsFile, /Qn=5e3/);
         assert.match(patchedRemoteConnectionsSettingsFile, /Control this Linux desktop/);
         assert.match(patchedRemoteConnectionsSettingsFile, /SSH connections from this Linux desktop/);
         assert.match(patchedMobileSetupDialogFile, /Connect your phone to this Linux desktop/);
         assert.match(patchedMobileSetupDialogFile, /apps on this Linux desktop/);
         assert.match(patchedSignalsFile, /codexLinuxRemoteMobileHydrateUnknownTurn/);
         assert.match(patchedSignalsFile, /codexLinuxRemoteMobileThreadRuntimeStatus/);
-        assert.match(patchedSignalsFile, /codexLinuxCompletedItemExists=/);
+        assert.doesNotMatch(patchedSignalsFile, /codexLinuxCompletedItemExists=/);
         assert.match(patchedTerminalStatusFile, /codexLinuxRemoteTerminalStatusWaitingOnUserInput/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlShouldReadStatus/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlStatusWaitMs/);
@@ -3770,7 +3787,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.ok(
           report.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-control-settings-ux" &&
-            patch.status === "applied",
+            patch.status === "skipped-disabled",
           ),
         );
         assert.ok(
@@ -3782,7 +3799,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.ok(
           report.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-connections-refresh" &&
-            patch.status === "applied",
+            patch.status === "skipped-disabled",
           ),
         );
         assert.ok(
@@ -3799,7 +3816,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.ok(
           report.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery" &&
-            patch.status === "applied",
+            patch.status === "skipped-disabled",
           ),
         );
         assert.ok(
@@ -3844,7 +3861,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.ok(
           secondReport.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery" &&
-            patch.status === "already-applied",
+            patch.status === "skipped-disabled",
           ),
         );
         assert.ok(

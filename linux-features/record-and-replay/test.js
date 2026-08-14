@@ -136,6 +136,7 @@ test("record-and-replay patch descriptor loads only when feature is enabled", ()
 test("record-and-replay dictation descriptor tracks moved upstream composer bundle", () => {
   const descriptor = descriptors.find((patch) => patch.id === "record-replay-dictation-transcript");
   assert.ok(descriptor);
+  assert.equal(descriptor.enabled({}), false);
   assert.equal(descriptor.pattern.test("app-initial-C-fROkKo.js"), true);
   assert.equal(descriptor.assetMatch(
     "let l=c.trim();l.length>0&&(a==null?mm.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:l}):a.setTranscript(l),n.performance.mark(`transcript_dispatched`),t===`send`?i.onTranscriptSend(l):i.onTranscriptInsert(l))",

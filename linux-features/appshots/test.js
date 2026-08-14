@@ -130,6 +130,10 @@ test("appshots feature descriptors are optional", () => {
   assert.ok(descriptors.every((descriptor) => descriptor.ciPolicy == null));
 });
 
+test("drifted AppShots descriptors stay disabled until retargeted", () => {
+  assert.ok(descriptors.every((descriptor) => descriptor.enabled({}) === false));
+});
+
 test("appshots availability descriptor matches the current bundle", () => {
   const descriptor = descriptors.find(
     (descriptor) => descriptor.id === "linux-appshots-availability",

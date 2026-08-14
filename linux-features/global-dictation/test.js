@@ -186,6 +186,7 @@ test("global dictation stays disabled until selected", () => {
       "feature:global-dictation:linux-global-dictation-main-process",
     ]);
     assert.equal(loaded[0].ciPolicy, "optional");
+    assert.equal(loaded[0].enabled({}), false);
   } finally {
     if (previous == null) delete process.env.CODEX_LINUX_FEATURES_CONFIG;
     else process.env.CODEX_LINUX_FEATURES_CONFIG = previous;
@@ -579,6 +580,7 @@ test("main patch reports a missing release watcher sentinel as an optional skip"
     {
       ...descriptors[0],
       id: "feature:global-dictation:linux-global-dictation-main-process",
+      enabled: undefined,
       sourceKind: "feature",
       featureId: "global-dictation",
     },

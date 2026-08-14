@@ -3,6 +3,11 @@
 const PATCH_MARKER = "codex-linux-global-dictation-v2";
 const IDENT = "[A-Za-z_$][\\w$]*";
 
+// The current signed Linux bundle no longer contains the contract targeted by
+// this patch. Keep the descriptor available for retargeting, but do not apply
+// it until it has been updated and verified against a new bundle.
+const DISABLED_UNTIL_UPSTREAM_RETARGETED = () => false;
+
 function warn(message) {
   console.warn(`WARN: ${message} - skipping Linux global dictation patch`);
 }
@@ -386,6 +391,7 @@ const descriptors = [
     id: "linux-global-dictation-main-process",
     phase: "main-bundle",
     order: 145,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     apply: applyLinuxGlobalDictationMainProcessPatch,
   },
 ];

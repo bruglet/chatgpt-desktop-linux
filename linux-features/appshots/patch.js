@@ -10,6 +10,11 @@ const LINUX_APPSHOT_WAYLAND_HOTKEYS = [
   { hotkey: "Ctrl+Super+A", label: "Ctrl + Super + A" },
 ];
 
+// The current signed Linux bundle no longer contains the contracts targeted by
+// these patches. Keep the descriptors available for retargeting, but do not
+// apply them until they have been updated and verified against a new bundle.
+const DISABLED_UNTIL_UPSTREAM_RETARGETED = () => false;
+
 function warn(message, patchName) {
   console.warn(`WARN: ${message} - skipping ${patchName}`);
 }
@@ -326,6 +331,7 @@ const descriptors = [
     id: "linux-appshots-main-process",
     phase: "main-bundle",
     order: 142,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     apply: applyLinuxAppshotMainProcessPatch,
   },
   {
@@ -333,6 +339,7 @@ const descriptors = [
     phase: "webview-asset",
     order: 1090,
     pattern: /^app-initial-[^.]+\.js$/,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "AppShots availability bundle",
     skipDescription: "Linux AppShots availability patch",
     apply: applyLinuxAppshotAvailabilityPatch,
@@ -341,6 +348,7 @@ const descriptors = [
     id: "linux-appshots-hotkey",
     phase: "main-bundle",
     order: 143,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     apply: applyLinuxAppshotHotkeyPatch,
   },
   {
@@ -348,6 +356,7 @@ const descriptors = [
     phase: "webview-asset",
     order: 1091,
     pattern: /^appshots-settings-.*\.js$/,
+    enabled: DISABLED_UNTIL_UPSTREAM_RETARGETED,
     missingDescription: "AppShots settings bundle",
     skipDescription: "Linux AppShots settings hotkey patch",
     apply: applyLinuxAppshotSettingsHotkeyPatch,

@@ -15,7 +15,7 @@ const PATCHED_SERVICE_TIER_GATE = new RegExp(
 );
 const PATCHED_MODEL_MARKER = new RegExp(`${MODEL_MARKER}:${JS_IDENT}===\\\`apikey\\\``);
 const MODEL_LIST_MAPPING_SHAPE = new RegExp(
-  `function ${JS_IDENT}\\(\\{authMethod:${JS_IDENT},availableModels:${JS_IDENT},` +
+  `function ${JS_IDENT}\\(\\{(?:additionalAvailableModels:${JS_IDENT},)?authMethod:${JS_IDENT},availableModels:${JS_IDENT},` +
     `defaultModel:${JS_IDENT},enabledReasoningEfforts:${JS_IDENT},` +
     `includeUltraReasoningEffort:${JS_IDENT},models:${JS_IDENT},useHiddenModels:${JS_IDENT}\\}\\)` +
     `\\{[\\s\\S]{0,3000}?supportedReasoningEfforts[\\s\\S]{0,1200}?isDefault`,
@@ -61,7 +61,7 @@ function applyApiKeyModelMarkerPatch(source) {
   }
 
   const modelListPattern = new RegExp(
-    `(function ${JS_IDENT}\\(\\{authMethod:(${JS_IDENT}),availableModels:${JS_IDENT},` +
+    `(function ${JS_IDENT}\\(\\{(?:additionalAvailableModels:${JS_IDENT},)?authMethod:(${JS_IDENT}),availableModels:${JS_IDENT},` +
       `defaultModel:${JS_IDENT},enabledReasoningEfforts:${JS_IDENT},` +
       `includeUltraReasoningEffort:${JS_IDENT},models:${JS_IDENT},useHiddenModels:${JS_IDENT}\\}\\)` +
       `\\{[\\s\\S]{0,1800}?[,;]${JS_IDENT}=\\{\\.\\.\\.${JS_IDENT},supportedReasoningEfforts:${JS_IDENT})(\\})`,
@@ -85,6 +85,31 @@ function applyApiKeyModelMarkerPatch(source) {
 
 function hasApiKeyModelListMappingShape(source) {
   return MODEL_LIST_MAPPING_SHAPE.test(source);
+}
+
+function matchesApiKeyServiceTierGateContract(source) {
+  return PATCHED_SERVICE_TIER_GATE.test(source) || hasApiKeyServiceTierGateShape(source);
+}
+
+function matchesApiKeyServiceTierModelContract(source) {
+  return PATCHED_MODEL_MARKER.test(source) || hasApiKeyModelListMappingShape(source);
+}
+
+function matchesFallbackFastTierContract(source) {
+  if (hasCompleteFallbackFastTierPatch(source)) {
+    return true;
+  }
+
+  const fastResolverShape = new RegExp(
+    `function ${JS_IDENT}\\(e\\)\\{return e\\?\\.serviceTiers\\?\\.find\\(e=>` +
+      `${JS_IDENT}\\(e\\.id,e\\.name\\)===\\\`fast\\\`\\|\\|e\\.name\\.trim\\(\\)\\.toLowerCase\\(\\)===\\\`priority\\\`\\)\\?\\?null\\}`,
+  );
+  const optionsShape = new RegExp(
+    `\\.\\.\\.\\(${JS_IDENT}\\?\\.serviceTiers\\?\\?\\[\\]\\)\\.map\\(${JS_IDENT}=>\\(\\{` +
+      `description:${JS_IDENT}\\(${JS_IDENT}\\),iconKind:${JS_IDENT}\\(${JS_IDENT}\\.id,${JS_IDENT}\\.name\\),` +
+      `label:${JS_IDENT}\\(${JS_IDENT}\\),tier:${JS_IDENT},value:${JS_IDENT}\\.id\\}\\)\\)`,
+  );
+  return fastResolverShape.test(source) && optionsShape.test(source);
 }
 
 function hasCompleteFallbackFastTierPatch(source) {
@@ -194,7 +219,8 @@ const descriptors = [
     phase: "webview-asset",
     order: 20600,
     ciPolicy: "optional",
-    pattern: /^app-initial~app-main~onboarding-page-[^.]+\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
+    assetMatch: matchesApiKeyServiceTierGateContract,
     missingDescription: "current API key service tier gate bundle",
     skipDescription: "API key service tier gate patch",
     apply: applyCurrentGatePatch,
@@ -204,7 +230,8 @@ const descriptors = [
     phase: "webview-asset",
     order: 20605,
     ciPolicy: "optional",
-    pattern: /^app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-[^.]+\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
+    assetMatch: matchesApiKeyServiceTierModelContract,
     missingDescription: "current API key service tier model bundle",
     skipDescription: "API key model service tier marker patch",
     apply: applyCurrentModelPatch,
@@ -214,7 +241,8 @@ const descriptors = [
     phase: "webview-asset",
     order: 20610,
     ciPolicy: "optional",
-    pattern: /^app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-[^.]+\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
+    assetMatch: matchesFallbackFastTierContract,
     missingDescription: "current API key service tier fallback bundle",
     skipDescription: "API key fallback fast tier patch",
     apply: applyCurrentFallbackFastTierPatch,
@@ -231,5 +259,8 @@ module.exports = {
   applyCurrentFallbackFastTierPatch,
   hasApiKeyServiceTierGateShape,
   hasApiKeyModelListMappingShape,
+  matchesApiKeyServiceTierGateContract,
+  matchesApiKeyServiceTierModelContract,
+  matchesFallbackFastTierContract,
   descriptors,
 };

@@ -25,6 +25,7 @@ const {
   PARCEL_WATCH_MARKER,
   PARCEL_WORKING_TREE_WATCH,
   QUALIFICATION_WARNINGS_SYMBOL_KEY,
+  REPORT_SHIM_SYMBOL_KEY,
   WATCHBOUND_VERSION,
   codexLinuxStartDirectoryOnlyWorkingTreeWatch,
   descriptors,
@@ -35,6 +36,7 @@ const {
 } = require("./patch.js");
 const {
   commitPackageDirectoryNoReplace,
+  currentArtifactManifest,
   packageHelperExitCode,
   packageTarget,
   stageWatchboundPackages,
@@ -42,6 +44,18 @@ const {
   validateTargetRuntime,
   verifyControlledPackageRoot,
 } = require("./watchbound-package.js");
+
+test("Nix Node 24.14 compatibility keeps a separate exact loader hash", () => {
+  const original = process.env.CODEX_WATCHBOUND_NIX_NODE_24_14;
+  delete process.env.CODEX_WATCHBOUND_NIX_NODE_24_14;
+  const upstreamHash = currentArtifactManifest().packages.loader.files["native-matrix.json"];
+  process.env.CODEX_WATCHBOUND_NIX_NODE_24_14 = "1";
+  const nixHash = currentArtifactManifest().packages.loader.files["native-matrix.json"];
+  if (original === undefined) delete process.env.CODEX_WATCHBOUND_NIX_NODE_24_14;
+  else process.env.CODEX_WATCHBOUND_NIX_NODE_24_14 = original;
+  assert.equal(upstreamHash, "4f63e441d5fc05a80ede19d32aefc9c6b4b3309a28e3c225078224099ad07769");
+  assert.equal(nixHash, "8ea0c8101cc7d0f97a5d988ce30240914a1ae5fecce7f6c4d02a7b80359e6cf4");
+});
 
 const MODULE_OVERRIDE_KEY = Symbol.for(
   "codex-linux.directory-only-working-tree-watch.test-module",
@@ -1189,7 +1203,6 @@ function packageFixtureManifest(t) {
   const version = WATCHBOUND_VERSION;
   const x64Binding = makeElf(62);
   const arm64Binding = makeElf(183);
-  const armBinding = makeElf(40, 32);
   const wrapper = createPackageFixture(t, "watchbound", version, {
     "index.js": "export const fixture = true;\n",
   });
@@ -1197,14 +1210,10 @@ function packageFixtureManifest(t) {
     "index.js": "module.exports = {};\n",
   });
   const targetFixture = (architecture, binding) => {
-    const target = architecture === "arm"
-      ? "linux-arm-gnueabihf"
-      : `linux-${architecture}-gnu`;
+    const target = `linux-${architecture}-gnu`;
     const targetTriple = architecture === "x64"
       ? "x86_64-unknown-linux-gnu"
-      : architecture === "arm64"
-        ? "aarch64-unknown-linux-gnu"
-        : "armv7-unknown-linux-gnueabihf";
+      : "aarch64-unknown-linux-gnu";
     const bindingPath = `watchbound.${target}.node`;
     const nativeSha256 = sha256(binding);
     return createPackageFixture(
@@ -1229,7 +1238,6 @@ function packageFixtureManifest(t) {
   };
   const x64 = targetFixture("x64", x64Binding);
   const arm64 = targetFixture("arm64", arm64Binding);
-  const arm = targetFixture("arm", armBinding);
   const artifact = (key, name, fixture, extra = {}) => ({
     name,
     license: "MIT",
@@ -1287,23 +1295,6 @@ function packageFixtureManifest(t) {
               },
             },
           ),
-          arm: artifact(
-            "arm",
-            "@gadicc/watchbound-node-linux-arm-gnueabihf",
-            arm,
-            {
-              nativeBinding: {
-                path: "watchbound.linux-arm-gnueabihf.node",
-                architecture: "arm",
-                target: "linux-arm-gnueabihf",
-                targetTriple: "armv7-unknown-linux-gnueabihf",
-                libc: "glibc",
-                elfClass: 32,
-                elfMachine: 40,
-                sha256: sha256(armBinding),
-              },
-            },
-          ),
         },
       },
     },
@@ -1312,12 +1303,11 @@ function packageFixtureManifest(t) {
       ["@gadicc/watchbound-node", loader.packageDir],
       ["@gadicc/watchbound-node-linux-x64-gnu", x64.packageDir],
       ["@gadicc/watchbound-node-linux-arm64-gnu", arm64.packageDir],
-      ["@gadicc/watchbound-node-linux-arm-gnueabihf", arm.packageDir],
     ]),
   };
 }
 
-test("the shipped artifact manifest pins the 2.1.1 source and all five packages", () => {
+test("the shipped artifact manifest pins the 2.1.1 source and four packages", () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(__dirname, "watchbound-artifacts.json"), "utf8"),
   );
@@ -1339,21 +1329,17 @@ test("the shipped artifact manifest pins the 2.1.1 source and all five packages"
     manifest.packages.targets.arm64.nativeBinding.path,
     "watchbound.linux-arm64-gnu.node",
   );
-  assert.equal(
-    manifest.packages.targets.arm.nativeBinding.path,
-    "watchbound.linux-arm-gnueabihf.node",
-  );
-  assert.deepEqual(Object.keys(manifest.packages.targets), ["x64", "arm64", "arm"]);
+  assert.deepEqual(Object.keys(manifest.packages.targets), ["x64", "arm64"]);
 });
 
 test("the artifact manifest requires every supported Codex architecture", (t) => {
   const fixture = packageFixtureManifest(t);
-  for (const architecture of ["x64", "arm64", "arm"]) {
+  for (const architecture of ["x64", "arm64"]) {
     const incomplete = structuredClone(fixture.manifest);
     delete incomplete.packages.targets[architecture];
     assert.throws(
       () => validateArtifactManifest(incomplete),
-      /must contain exactly the x64, arm64, and arm targets/u,
+      /must contain exactly the x64 and arm64 targets/u,
     );
   }
 });
@@ -1675,7 +1661,7 @@ test("controlled source staging rejects installed wrapper and loader inventory d
   }
 });
 
-test("Watchbound package staging selects ARM64 and ARMv7 targets", async (t) => {
+test("Watchbound package staging selects the ARM64 target", async (t) => {
   const fixture = packageFixtureManifest(t);
   const materializePackage = async (request) => ({
     packageDir: fixture.packages.get(request.name),
@@ -1684,7 +1670,7 @@ test("Watchbound package staging selects ARM64 and ARMv7 targets", async (t) => 
     sha256: request.sha256,
     source: "fixture",
   });
-  for (const arch of ["arm64", "arm"]) {
+  for (const arch of ["arm64"]) {
     const extractedDir = tempDirectory(t, `watchbound-${arch}-app-`);
     writeExtractedAppRuntime(extractedDir);
     await stageWatchboundPackages(packageStageOptions(extractedDir, fixture, {
@@ -1730,8 +1716,6 @@ test("Watchbound staging rejects architecture switches before changing the packa
   for (const [firstArch, secondArch] of [
     ["x64", "arm64"],
     ["arm64", "x64"],
-    ["x64", "arm"],
-    ["arm", "arm64"],
   ]) {
     const extractedDir = tempDirectory(t, `watchbound-${firstArch}-switch-`);
     writeExtractedAppRuntime(extractedDir);
@@ -3306,7 +3290,9 @@ async function waitFor(predicate, label, timeout = 3000) {
 }
 
 test("the adapter fails closed on every Watchbound 2.1.1 contract mismatch", async (t) => {
+  const originalReport = Object.getOwnPropertyDescriptor(process, "report");
   t.after(() => {
+    Object.defineProperty(process, "report", originalReport);
     delete globalThis[MODULE_OVERRIDE_KEY];
     delete globalThis[ENGINE_KEY];
   });
@@ -3369,6 +3355,180 @@ test("the adapter fails closed on every Watchbound 2.1.1 contract mismatch", asy
     );
     assert.equal(fake.subscriptions.length, 0);
   }
+});
+
+test("the adapter replaces process.report before any Watchbound code runs", async (t) => {
+  const originalReport = Object.getOwnPropertyDescriptor(process, "report");
+  let poisonedCalls = 0;
+  Object.defineProperty(process, "report", {
+    configurable: true,
+    enumerable: true,
+    value: {
+      getReport() {
+        poisonedCalls += 1;
+        throw new Error("getReport is fatal inside the packaged Electron binary");
+      },
+    },
+  });
+  const fake = fakeWatchbound();
+  fake.capabilities.schemaVersion = 0;
+  globalThis[MODULE_OVERRIDE_KEY] = fake;
+  delete globalThis[ENGINE_KEY];
+  t.after(() => {
+    delete globalThis[MODULE_OVERRIDE_KEY];
+    delete globalThis[ENGINE_KEY];
+    Object.defineProperty(process, "report", originalReport);
+  });
+
+  const start = () => codexLinuxStartDirectoryOnlyWorkingTreeWatch(
+    {
+      getFileSystemPath: () => "/qualified/root",
+      platformPath: async () => path.posix,
+    },
+    {
+      path: "/logical/root",
+      recursive: true,
+      renameEventHandling: "changed-path-with-parent-directory",
+      onChange() {},
+    },
+    {
+      maxWatches: 64,
+      honorGitIgnore: false,
+      ignoredDirectoryNames: [],
+    },
+  );
+  await assert.rejects(start(), /requires watchbound 2\.1\.1/u);
+
+  assert.equal(poisonedCalls, 0);
+  const shim = process.report;
+  assert.equal(shim[Symbol.for(REPORT_SHIM_SYMBOL_KEY)], true);
+  const report = shim.getReport();
+  assert.equal(typeof report.header, "object");
+  assert.ok(Array.isArray(report.sharedObjects));
+  let expectGlibc = false;
+  try {
+    expectGlibc = fs.readFileSync("/usr/bin/ldd", "latin1").includes("GNU C Library");
+  } catch {}
+  if (expectGlibc) {
+    assert.match(report.header.glibcVersionRuntime, /^\d+\.\d+/u);
+  }
+
+  await assert.rejects(start(), /requires watchbound 2\.1\.1/u);
+  assert.equal(process.report, shim);
+});
+
+test("the report shim reads the glibc version from a Nix store interpreter", async (t) => {
+  const interpreterPath =
+    "/nix/store/6q3xi2h1a7lb0k5cm9dr8v4y5zj0wf2s-glibc-2.40-66/lib64/ld-linux-x86-64.so.2";
+  const interpreterBytes = Buffer.from(`${interpreterPath}\0`, "utf8");
+  const image = Buffer.alloc(512);
+  image.writeUInt32LE(0x464c457f, 0);
+  image[4] = 2;
+  image[5] = 1;
+  image.writeBigUInt64LE(64n, 32);
+  image.writeUInt16LE(56, 54);
+  image.writeUInt16LE(1, 56);
+  image.writeUInt32LE(3, 64);
+  image.writeBigUInt64LE(256n, 64 + 8);
+  image.writeBigUInt64LE(BigInt(interpreterBytes.length), 64 + 32);
+  interpreterBytes.copy(image, 256);
+  const executable = path.join(tempDirectory(t, "watchbound-nix-elf-"), "electron");
+  fs.writeFileSync(executable, image);
+
+  const originalReport = Object.getOwnPropertyDescriptor(process, "report");
+  Object.defineProperty(process, "report", {
+    configurable: true,
+    enumerable: true,
+    value: {
+      getReport() {
+        throw new Error("getReport is fatal inside the packaged Electron binary");
+      },
+    },
+  });
+  const fake = fakeWatchbound();
+  fake.capabilities.schemaVersion = 0;
+  fake.reportProbeExecutable = executable;
+  globalThis[MODULE_OVERRIDE_KEY] = fake;
+  delete globalThis[ENGINE_KEY];
+  t.after(() => {
+    delete globalThis[MODULE_OVERRIDE_KEY];
+    delete globalThis[ENGINE_KEY];
+    Object.defineProperty(process, "report", originalReport);
+  });
+
+  await assert.rejects(
+    codexLinuxStartDirectoryOnlyWorkingTreeWatch(
+      {
+        getFileSystemPath: () => "/qualified/root",
+        platformPath: async () => path.posix,
+      },
+      {
+        path: "/logical/root",
+        recursive: true,
+        renameEventHandling: "changed-path-with-parent-directory",
+        onChange() {},
+      },
+      {
+        maxWatches: 64,
+        honorGitIgnore: false,
+        ignoredDirectoryNames: [],
+      },
+    ),
+    /requires watchbound 2\.1\.1/u,
+  );
+
+  const report = process.report.getReport();
+  assert.equal(report.header.glibcVersionRuntime, "2.40");
+  assert.deepEqual(report.sharedObjects, []);
+});
+
+test("a failed Watchbound import degrades to the preserved fallback", async (t) => {
+  const originalReport = Object.getOwnPropertyDescriptor(process, "report");
+  let poisonedCalls = 0;
+  Object.defineProperty(process, "report", {
+    configurable: true,
+    enumerable: true,
+    value: {
+      getReport() {
+        poisonedCalls += 1;
+        throw new Error("getReport is fatal inside the packaged Electron binary");
+      },
+    },
+  });
+  delete globalThis[MODULE_OVERRIDE_KEY];
+  delete globalThis[ENGINE_KEY];
+  t.after(() => {
+    Object.defineProperty(process, "report", originalReport);
+  });
+
+  let fallbackCalls = 0;
+  const preserved = { dispose() {} };
+  const result = await codexLinuxStartDirectoryOnlyWorkingTreeWatch(
+    {
+      getFileSystemPath: () => "/qualified/root",
+      platformPath: async () => path.posix,
+    },
+    {
+      path: "/logical/root",
+      recursive: true,
+      renameEventHandling: "changed-path-with-parent-directory",
+      onChange() {},
+    },
+    {
+      maxWatches: 64,
+      honorGitIgnore: false,
+      ignoredDirectoryNames: [],
+    },
+    () => {
+      fallbackCalls += 1;
+      return preserved;
+    },
+  );
+
+  assert.equal(fallbackCalls, 1);
+  assert.equal(result, preserved);
+  assert.equal(poisonedCalls, 0);
+  assert.equal(process.report[Symbol.for(REPORT_SHIM_SYMBOL_KEY)], true);
 });
 
 test("the adapter preserves Codex policy around the Watchbound engine", async (t) => {

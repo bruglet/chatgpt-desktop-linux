@@ -101,31 +101,6 @@
           "elfMachine": 183,
           "sha256": "9d7208e8fd961af3e26d4cc23403b593b2efdfd686af1ef6a70f462798357fb4"
         }
-      },
-      "arm": {
-        "name": "@gadicc/watchbound-node-linux-arm-gnueabihf",
-        "license": "MIT",
-        "url": "https://registry.npmjs.org/@gadicc/watchbound-node-linux-arm-gnueabihf/-/watchbound-node-linux-arm-gnueabihf-2.1.1.tgz",
-        "integrity": "sha512-SLjawq9r4WCFAMDd2IzcsmE/w6lNltdKZ8HSIQH9WW67fx3ghPSY+HUPTd0y9l/3PFiBje6FvmQ/xb4N7/OePw==",
-        "shasum": "f79f4aab8f79ef3aab0fd9cb3357fbe26dcabf0e",
-        "sha256": "b651f72ef6869672368fb25cf88a6edee8564aa94d22a80c8c29de77992042b8",
-        "archiveEnvironment": "CODEX_WATCHBOUND_NODE_ARM_ARCHIVE",
-        "files": {
-          "LICENSE.txt": "fa95ce16057358473c9c2fd682b37cda63c6190588663ca70f8e56e624de06cb",
-          "README.md": "7d6abc2d896522f805c15a9c991cec23b94af7f143e138b31cf8bf55ecfbff57",
-          "package.json": "1c542e9dfafb523d68c86e6277cd7b5599df7537af5fe635acd34513be6a91c4",
-          "watchbound.linux-arm-gnueabihf.node": "ea5a885fa48715e9ebc5bfc82088b307b0bc9ee99b22b60cad6f4b58df558998"
-        },
-        "nativeBinding": {
-          "path": "watchbound.linux-arm-gnueabihf.node",
-          "architecture": "arm",
-          "target": "linux-arm-gnueabihf",
-          "targetTriple": "armv7-unknown-linux-gnueabihf",
-          "libc": "glibc",
-          "elfClass": 32,
-          "elfMachine": 40,
-          "sha256": "ea5a885fa48715e9ebc5bfc82088b307b0bc9ee99b22b60cad6f4b58df558998"
-        }
       }
     }
   }

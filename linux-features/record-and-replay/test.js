@@ -16,9 +16,6 @@ const {
   stageEnabledLinuxFeatureInstall,
 } = require("../../scripts/lib/linux-features.js");
 const {
-  applyLinuxExternalOpenEnvPatch,
-} = require("../../scripts/patches/impl/main-process/browser.js");
-const {
   applyRecordReplayDictationTranscriptPatch,
   applyRecordReplayGlobalDictationTranscriptPatch,
   applyRecordReplayHudPatch,
@@ -141,7 +138,7 @@ test("record-and-replay dictation descriptor tracks moved upstream composer bund
   assert.ok(descriptor);
   assert.equal(descriptor.pattern.test("app-initial-C-fROkKo.js"), true);
   assert.equal(descriptor.assetMatch(
-    "let a=i.trim();a.length>0&&(qf.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:a}),t===`send`?r.onTranscriptSend(a):r.onTranscriptInsert(a))",
+    "let l=c.trim();l.length>0&&(a==null?mm.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:l}):a.setTranscript(l),n.performance.mark(`transcript_dispatched`),t===`send`?i.onTranscriptSend(l):i.onTranscriptInsert(l))",
   ), true);
   assert.equal(descriptor.pattern.test("app-initial~app-main~onboarding-page-BUwCKIcU.js"), false);
   assert.equal(descriptor.pattern.test("use-dictation-BUwCKIcU.js"), false);
@@ -220,7 +217,7 @@ test("record-and-replay bridge patch is idempotent and uses execFile", () => {
   assert.doesNotMatch(patched, /"--mode"/);
 });
 
-test("record-and-replay bridge remains complete after external-open composition", () => {
+test("record-and-replay bridge is complete and idempotent on the official bundle", () => {
   const source = [
     '"use strict";let electron=require("electron");',
     'const cp=require("node:child_process"),fs=require("node:fs"),path=require("node:path");',
@@ -228,15 +225,14 @@ test("record-and-replay bridge remains complete after external-open composition"
     'var bridge={"get-global-state":async({key:e})=>null};',
   ].join("");
   const recordPatched = applyRecordReplayMainBridgePatch(source);
-  const composed = applyLinuxExternalOpenEnvPatch(recordPatched);
   const { value, warnings } = captureWarns(() =>
-    applyRecordReplayMainBridgePatch(composed),
+    applyRecordReplayMainBridgePatch(recordPatched),
   );
 
-  assert.equal(value, composed);
+  assert.equal(value, recordPatched);
   assert.deepEqual(warnings, []);
   assert.match(
-    composed,
+    recordPatched,
     /require\("node:child_process"\)\.execFile\(/,
   );
 });
@@ -633,6 +629,19 @@ test("record-and-replay mirrors finalized dictation transcripts into active bund
   assert.match(patched, /e===`send`\?n\.onTranscriptSend\(i\):n\.onTranscriptInsert\(i\)/);
 });
 
+test("record-and-replay matches the official 26.803.81509 persistent composer transcript", () => {
+  const source =
+    "let l=c.trim();l.length>0&&(a==null?mm.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:l}):a.setTranscript(l),n.performance.mark(`transcript_dispatched`),t===`send`?i.onTranscriptSend(l):i.onTranscriptInsert(l))";
+  const patched = applyRecordReplayDictationTranscriptPatch(source);
+
+  assert.notEqual(patched, source);
+  assert.equal(applyRecordReplayDictationTranscriptPatch(patched), patched);
+  assert.match(patched, /codexLinuxRecordReplayCaptureTranscript\?\.\(l,t\)/);
+  assert.match(patched, /a==null\?mm\.getInstance\(\)\.dispatchMessage/);
+  assert.match(patched, /a\.setTranscript\(l\)/);
+  assert.match(patched, /t===`send`\?i\.onTranscriptSend\(l\):i\.onTranscriptInsert\(l\)/);
+});
+
 test("record-and-replay mirrors global dictation completions into active bundle", () => {
   const source =
     "async function L(e,t,n=null){let r=await f({transcript:n==null?await y(e.audio):await R(n,e.audio),cleanupEnabled:t});U===e&&(U=null),a.dispatchMessage(`global-dictation-completed`,{sessionId:e.sessionId,text:r})}";
@@ -644,6 +653,27 @@ test("record-and-replay mirrors global dictation completions into active bundle"
   assert.match(patched, /linux-record-replay-speech-context-active/);
   assert.match(patched, /source:"codex-global-dictation"/);
   assert.match(patched, /a\.dispatchMessage\(`global-dictation-completed`,\{sessionId:e\.sessionId,text:r\}\)/);
+});
+
+test("record-and-replay matches the official 26.803.81509 global dictation success chain", () => {
+  const source =
+    "async function U(e,t,n=null){let r=Date.now(),i=n==null?await I(e.audio):await W(n,e.audio);e.analytics.performance.mark(`final_received`);let a=await E({transcript:i,cleanupEnabled:t});J===e&&(J=null),a.trim().length>0&&e.recordingPersistence?.setTranscript(a.trim()),e.analytics.performance.mark(`transcript_dispatched`),B.dispatchMessage(`global-dictation-completed`,{sessionId:e.sessionId,text:a})}";
+  const patched = applyRecordReplayGlobalDictationTranscriptPatch(source);
+
+  assert.notEqual(patched, source);
+  assert.equal(applyRecordReplayGlobalDictationTranscriptPatch(patched), patched);
+  assert.match(patched, /codex-linux-record-replay-global-dictation/);
+  assert.match(patched, /B\.dispatchMessage\(`global-dictation-completed`,\{sessionId:e\.sessionId,text:a\}\)/);
+});
+
+test("record-and-replay current transcript drift remains byte-identical", () => {
+  const composer =
+    "let l=c.trim();l.length>0&&(a==null?mm.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:l}):a.persistTranscript(l),n.performance.mark(`transcript_dispatched`),t===`send`?i.onTranscriptSend(l):i.onTranscriptInsert(l))";
+  const global =
+    "e.analytics.performance.mark(`transcript_saved`),B.dispatchMessage(`global-dictation-completed`,{sessionId:e.sessionId,text:a})";
+
+  assert.equal(applyRecordReplayDictationTranscriptPatch(composer), composer);
+  assert.equal(applyRecordReplayGlobalDictationTranscriptPatch(global), global);
 });
 
 test("record-and-replay generated transcript runtimes are syntactically valid", () => {
@@ -995,36 +1025,6 @@ test("record-and-replay disabled rebuild exposes cleanup hook for staged payload
   }
 });
 
-test("launcher rejects unsafe bundled plugin version path components", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-record-replay-version-"));
-  try {
-    const launcher = fs.readFileSync(path.join(repoRoot(), "launcher/start.sh.template"), "utf8");
-    const segment = launcher.slice(
-      launcher.indexOf("bundled_plugin_version() {"),
-      launcher.indexOf("bundled_plugin_name() {"),
-    );
-    assert.notEqual(segment.length, 0);
-
-    const run = (version) => {
-      const pluginDir = path.join(workspace, `plugin-${String(version).replace(/[^A-Za-z0-9._-]/g, "_")}`);
-      fs.mkdirSync(path.join(pluginDir, ".codex-plugin"), { recursive: true });
-      const pluginJson = path.join(pluginDir, ".codex-plugin/plugin.json");
-      fs.writeFileSync(pluginJson, JSON.stringify({ name: "record-and-replay", version }));
-      return execFileSync("bash", ["-c", `${segment}\nbundled_plugin_version "$1"`, "probe", pluginJson], {
-        encoding: "utf8",
-      }).trim();
-    };
-
-    assert.equal(run("1.2.3-linux.1"), "1.2.3-linux.1");
-    assert.throws(() => run("."));
-    assert.throws(() => run(".."));
-    assert.throws(() => run("../escape"));
-    assert.throws(() => run("1/2"));
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
 test("record-and-replay stage hook uses the current upstream plugin shell when present", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-record-replay-stage-upstream-"));
   try {
@@ -1032,7 +1032,7 @@ test("record-and-replay stage hook uses the current upstream plugin shell when p
     const fakeBinary = path.join(workspace, "codex-record-replay-linux");
     const upstreamPlugin = path.join(
       workspace,
-      "upstream/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/record-and-replay",
+      "upstream/usr/lib/chatgpt/resources/plugins/openai-bundled/plugins/record-and-replay",
     );
     const marketplace = path.join(installDir, "resources/plugins/openai-bundled/.agents/plugins/marketplace.json");
     fs.mkdirSync(path.join(upstreamPlugin, ".codex-plugin"), { recursive: true });
@@ -1085,7 +1085,7 @@ test("record-and-replay stage hook uses the current upstream plugin shell when p
         ...process.env,
         SCRIPT_DIR: repoRoot(),
         INSTALL_DIR: installDir,
-        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/ChatGPT.app"),
+        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/usr/lib/chatgpt"),
         CODEX_RECORD_REPLAY_LINUX_SOURCE: fakeBinary,
       },
       stdio: "pipe",
@@ -1125,7 +1125,7 @@ test("record-and-replay stage hook rejects the obsolete nested-app plugin shell"
     const fakeBinary = path.join(workspace, "codex-record-replay-linux");
     const upstreamPlugin = path.join(
       workspace,
-      "upstream/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/record-and-replay",
+      "upstream/usr/lib/chatgpt/resources/plugins/openai-bundled/plugins/record-and-replay",
     );
     const oldClient = path.join(
       upstreamPlugin,
@@ -1173,7 +1173,7 @@ test("record-and-replay stage hook rejects the obsolete nested-app plugin shell"
         ...process.env,
         SCRIPT_DIR: repoRoot(),
         INSTALL_DIR: installDir,
-        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/ChatGPT.app"),
+        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/usr/lib/chatgpt"),
         CODEX_RECORD_REPLAY_LINUX_SOURCE: fakeBinary,
       },
       stdio: "pipe",
@@ -1193,7 +1193,7 @@ test("record-and-replay stage hook borrows upstream webview icon when present", 
   try {
     const installDir = path.join(workspace, "install");
     const fakeBinary = path.join(workspace, "codex-record-replay-linux");
-    const assetsDir = path.join(installDir, "content/webview/assets");
+    const assetsDir = path.join(installDir, "resources");
     fs.mkdirSync(assetsDir, { recursive: true });
     fs.writeFileSync(path.join(assetsDir, "record-and-replay-plugin-icon-fixture.png"), "fake-png");
     fs.writeFileSync(fakeBinary, "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n");

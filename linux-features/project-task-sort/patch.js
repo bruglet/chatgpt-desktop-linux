@@ -29,14 +29,22 @@ function applyProjectTaskSortPatch(source) {
   return source.replace(currentCreationTime, patchedCreationTime);
 }
 
+function matchesProjectTaskSortContract(source) {
+  const currentCount = countOccurrences(source, currentCreationTime);
+  const patchedCount = countOccurrences(source, patchedCreationTime);
+  const unpatchedCount = currentCount - patchedCount;
+  return (patchedCount === 1 && unpatchedCount === 0) ||
+    (patchedCount === 0 && unpatchedCount === 1);
+}
+
 const descriptors = [
   {
     id: "creation-time",
     phase: "webview-asset",
     order: 20_900,
     ciPolicy: "optional",
-    pattern:
-      /^app-initial~app-main~onboarding-page~projects-index-page~quick-chat-window-page~codex-micro~iqsnin5k-Bxmd3ja1\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
+    assetMatch: matchesProjectTaskSortContract,
     missingDescription: "project task sort webview bundle",
     skipDescription: "project task creation timestamp feature patch",
     apply: applyProjectTaskSortPatch,
@@ -45,5 +53,6 @@ const descriptors = [
 
 module.exports = {
   applyProjectTaskSortPatch,
+  matchesProjectTaskSortContract,
   descriptors,
 };

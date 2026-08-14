@@ -7,8 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-require("./dock-icon.test.js");
 require("./suggested-prompts.test.js");
+require("./dock-icon.test.js");
 
 const {
   discoverLinuxFeatureManifests,
@@ -183,7 +183,6 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
         ["feature:ui-tweaks:reasoning-effort-labels-english", "webview-asset", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-main-process", "main-bundle", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-settings-row", "webview-asset", "optional"],
-        ["feature:ui-tweaks:appearance-dock-icon-settings-search", "webview-asset", "optional"],
         ["feature:ui-tweaks:home-suggested-prompts-main-process", "main-bundle", "optional"],
         ["feature:ui-tweaks:home-suggested-prompts-app-page", "webview-asset", "optional"],
         ["feature:ui-tweaks:home-suggested-prompts-settings-row", "webview-asset", "optional"],
@@ -211,7 +210,7 @@ test("model picker descriptors target the current state and menu bundles", () =>
   assert.match(stateAsset, MODEL_PICKER_INLINE_ASSET_PATTERN);
   assert.match(effortAsset, MODEL_PICKER_EFFORT_ASSET_PATTERN);
 
-  // Current-DMG-only targeting must not retain previous chunks as fallbacks.
+  // Current-package-only targeting must not retain previous chunks as fallbacks.
   assert.doesNotMatch(
     "app-initial~app-main~page-CMpPiY3-.js",
     MODEL_PICKER_STATE_ASSET_PATTERN,

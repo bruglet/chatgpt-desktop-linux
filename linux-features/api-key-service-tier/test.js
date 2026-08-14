@@ -85,7 +85,7 @@ test("api-key-service-tier stays disabled until listed in features.json", () => 
   });
 });
 
-test("current DMG descriptors target the three owning app bundles", () => {
+test("current package descriptors use the semantic app-initial owner", () => {
   assert.deepEqual(
     descriptors.map((descriptor) => descriptor.id),
     [
@@ -94,38 +94,8 @@ test("current DMG descriptors target the three owning app bundles", () => {
       "api-key-service-tier-fallback",
     ],
   );
-  assert.equal(
-    descriptors[0].pattern.test("app-initial~app-main~onboarding-page-DjTNhJXu.js"),
-    true,
-  );
-  assert.equal(
-    descriptors[1].pattern.test(
-      "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js",
-    ),
-    true,
-  );
-  assert.equal(
-    descriptors[2].pattern.test(
-      "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-BqLP6EDd.js",
-    ),
-    true,
-  );
-  assert.equal(
-    descriptors.some((descriptor) =>
-      descriptor.pattern.test(
-        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
-      ),
-    ),
-    false,
-  );
-  assert.equal(
-    descriptors.some((descriptor) =>
-      descriptor.pattern.test(
-        "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
-      ),
-    ),
-    false,
-  );
+  assert.ok(descriptors.every((descriptor) => descriptor.pattern.test("app-initial-Bd3Z1bES.js")));
+  assert.ok(descriptors.every((descriptor) => !descriptor.pattern.test("projects-index-page-DjNy92Xe.js")));
 });
 
 test("current target wrappers warn when an exact contract disappears", () => {
@@ -153,20 +123,20 @@ test("partial current drift is reported when the other exact target still applie
       const assetsDir = path.join(tempApp, "webview", "assets");
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(
-        path.join(assetsDir, "app-initial~app-main~onboarding-page-drifted.js"),
+        path.join(assetsDir, "app-initial-gate-drifted.js"),
         "function driftedGate(){return `priority_mode`}",
       );
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-current.js",
+          "app-initial-model-current.js",
         ),
         "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}",
       );
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-current.js",
+          "app-initial-fallback-current.js",
         ),
         [
           "let defaultServiceTier=null;",
@@ -188,7 +158,7 @@ test("partial current drift is reported when the other exact target still applie
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
-      assert.ok(warnings.some((warning) => warning.includes("current service tier auth gate")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier gate bundle")));
       assert.equal(gate?.status, "skipped-optional");
       assert.equal(model?.status, "applied");
       assert.equal(fallback?.status, "applied");
@@ -347,7 +317,7 @@ test("fallback descriptor reports skipped when one insertion point drifts", () =
       const assetsDir = path.join(tempApp, "webview", "assets");
       const targetPath = path.join(
         assetsDir,
-        "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-drifted.js",
+        "app-initial-fallback-drifted.js",
       );
       const source = [
         "let defaultServiceTier=null;",
@@ -363,7 +333,7 @@ test("fallback descriptor reports skipped when one insertion point drifts", () =
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
-      assert.ok(warnings.some((warning) => warning.includes("all current service tier option helpers")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier fallback bundle")));
       assert.equal(fallback?.status, "skipped-optional");
       assert.equal(fs.readFileSync(targetPath, "utf8"), source);
     } finally {

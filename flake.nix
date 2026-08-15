@@ -282,16 +282,20 @@
           enableComputerUseUi ? false,
         }:
           let
-            normalizedFeatureIds = nixLinuxFeatures.normalize (
+            userFeatureIds = nixLinuxFeatures.normalize (
               linuxFeatureIds ++ lib.optional enableComputerUseUi "computer-use-linux"
             );
-            workspaceHelpers = mkWorkspaceHelpers normalizedFeatureIds;
-            watchboundEnabled = lib.elem "directory-only-working-tree-watch" normalizedFeatureIds;
-            codexMicroEnabled = lib.elem "codex-micro" normalizedFeatureIds;
+            internalNixFeatureIds = [ "nix-store-bundled-marketplace-permissions" ];
+            effectiveFeatureIds = nixLinuxFeatures.normalizeAll (
+              userFeatureIds ++ internalNixFeatureIds
+            );
+            workspaceHelpers = mkWorkspaceHelpers effectiveFeatureIds;
+            watchboundEnabled = lib.elem "directory-only-working-tree-watch" effectiveFeatureIds;
+            codexMicroEnabled = lib.elem "codex-micro" effectiveFeatureIds;
             featuresConfig = pkgs.writeText "codex-linux-features.json" (builtins.toJSON {
-              enabled = normalizedFeatureIds;
+              enabled = effectiveFeatureIds;
             });
-            suffix = if normalizedFeatureIds == [ ] then "" else "-${lib.concatStringsSep "-" normalizedFeatureIds}";
+            suffix = if userFeatureIds == [ ] then "" else "-${lib.concatStringsSep "-" userFeatureIds}";
           in
           pkgs.stdenv.mkDerivation {
             pname = "codex-desktop${suffix}";
@@ -328,24 +332,25 @@
               export CODEX_INSTALL_TRANSACTION_ACTIVE=1
               export CODEX_INSTALL_DIR="$out/opt/codex-desktop"
               export CODEX_LINUX_FEATURES_CONFIG="${featuresConfig}"
+              export CODEX_INTERNAL_LINUX_FEATURE_IDS="${lib.concatStringsSep "," internalNixFeatureIds}"
               ${lib.optionalString (flakeSourceCommit != "") ''
               export CODEX_LINUX_SOURCE_COMMIT="${flakeSourceCommit}"
               export CODEX_LINUX_SOURCE_REMOTE="${flakeSourceRemote}"
               ''}
-              ${lib.optionalString (lib.elem "computer-use-linux" normalizedFeatureIds) ''
+              ${lib.optionalString (lib.elem "computer-use-linux" effectiveFeatureIds) ''
               export CODEX_COMPUTER_USE_BINARY_SOURCE="${workspaceHelpers}/bin/codex-computer-use-linux"
               export CODEX_COMPUTER_USE_COSMIC_BINARY_SOURCE="${workspaceHelpers}/bin/codex-computer-use-cosmic"
               ''}
-              ${lib.optionalString (lib.elem "read-aloud-mcp" normalizedFeatureIds) ''
+              ${lib.optionalString (lib.elem "read-aloud-mcp" effectiveFeatureIds) ''
               export CODEX_LINUX_READ_ALOUD_MCP_SOURCE="${workspaceHelpers}/bin/codex-read-aloud-linux"
               ''}
-              ${lib.optionalString (lib.elem "record-and-replay" normalizedFeatureIds) ''
+              ${lib.optionalString (lib.elem "record-and-replay" effectiveFeatureIds) ''
               export CODEX_RECORD_REPLAY_LINUX_SOURCE="${workspaceHelpers}/bin/codex-record-replay-linux"
               ''}
-              ${lib.optionalString (lib.elem "global-dictation" normalizedFeatureIds) ''
+              ${lib.optionalString (lib.elem "global-dictation" effectiveFeatureIds) ''
               export CODEX_GLOBAL_DICTATION_LINUX_SOURCE="${globalDictationHelper}/bin/codex-global-dictation-linux"
               ''}
-              ${lib.optionalString (lib.elem "mcp-helper-reaper" normalizedFeatureIds) ''
+              ${lib.optionalString (lib.elem "mcp-helper-reaper" effectiveFeatureIds) ''
               export CODEX_MCP_HELPER_REAPER_SOURCE="${mcpReaperHelper}/bin/codex-mcp-helper-reaper"
               ''}
               ${lib.optionalString watchboundEnabled ''
@@ -355,6 +360,10 @@
               bash "$source_dir/install.sh" "${upstreamDeb}"
 
               app="$out/opt/codex-desktop"
+              test -d "$app"
+              node "$source_dir/scripts/ci/validate-patch-report.js" \
+                "$app/.codex-linux/patch-report.json" \
+                --require-enabled-feature nix-store-bundled-marketplace-permissions
               dynamic_linker="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
               node "$source_dir/nix/elf-runtime.cjs" fix \
                 --root "$app" \
@@ -387,7 +396,7 @@
                 --replace-fail "/usr/bin/codex-desktop" "$out/bin/codex-desktop" \
                 --replace-fail "/usr/share/applications/codex-desktop.desktop" "$out/share/applications/codex-desktop.desktop"
               makeWrapper "$app/start.sh" "$out/bin/codex-desktop" \
-                --prefix PATH : "${runtimePathFor normalizedFeatureIds}" \
+                --prefix PATH : "${runtimePathFor effectiveFeatureIds}" \
                 --set-default ALSA_PLUGIN_DIR "${pkgs.pipewire}/lib/alsa-lib" \
                 --run 'export XDG_DATA_DIRS="''${XDG_DATA_DIRS:-${xdgDefaultDataDirs}}"' \
                 --prefix XDG_DATA_DIRS : "${gsettingsSchemaDataDirs}" \
@@ -405,7 +414,9 @@
               runHook postInstall
             '';
             passthru = {
-              inherit linuxFeatureIds upstreamDeb;
+              linuxFeatureIds = userFeatureIds;
+              effectiveLinuxFeatureIds = effectiveFeatureIds;
+              inherit upstreamDeb;
               upstreamVersion = codexVersion;
               upstreamArchitecture = officialPackage.architecture;
             };
@@ -714,7 +725,7 @@
             ${package}/bin/codex-desktop --diagnose
           ${pkgs.gnugrep}/bin/grep -Fx 'alsa=x:' "$capture"
           ${pkgs.gnugrep}/bin/grep -Fx 'xdg=x:${gsettingsSchemaDataDirs}:${xdgDefaultDataDirs}' "$capture"
-          ${pkgs.gnugrep}/bin/grep -Fx 'path=${runtimePathFor package.passthru.linuxFeatureIds}:/caller/bin' "$capture"
+          ${pkgs.gnugrep}/bin/grep -Fx 'path=${runtimePathFor package.passthru.effectiveLinuxFeatureIds}:/caller/bin' "$capture"
           ${pkgs.gnugrep}/bin/grep -Fx 'ld=x:/caller/lib' "$capture"
           ${pkgs.gnugrep}/bin/grep -Fx \
             'args=<--ozone-platform=wayland><--enable-wayland-ime=true><--wayland-text-input-version=3><--diagnose>' \
@@ -728,7 +739,7 @@
           ${pkgs.gnugrep}/bin/grep -Fx 'ld=x:' "$capture"
           ${pkgs.gnugrep}/bin/grep -Fx 'bamf=/caller/desktop' "$capture"
         '';
-        mkRuntimeCheck = name: package: verifyCleanAsar: verifyWatchbound:
+        mkRuntimeCheck = name: package: verifyBundledMarketplacePermissions: verifyWatchbound:
           pkgs.runCommand name {
             nativeBuildInputs = [ pkgs.coreutils pkgs.dpkg pkgs.nodejs pkgs.patchelf ];
           } ''
@@ -785,10 +796,11 @@
             fs.rmSync(root, { recursive: true, force: true });
             NODE
             ''}
-            ${lib.optionalString verifyCleanAsar ''
-            upstream_root="$(mktemp -d)"
-            dpkg-deb -x ${upstreamDeb} "$upstream_root"
-            cmp "$upstream_root/usr/lib/chatgpt/resources/app.asar" "$app/resources/app.asar"
+            ${lib.optionalString verifyBundledMarketplacePermissions ''
+            node ${sourceRoot}/scripts/ci/validate-patch-report.js \
+              "$app/.codex-linux/patch-report.json" \
+              --require-enabled-feature nix-store-bundled-marketplace-permissions \
+              --require-applied feature:nix-store-bundled-marketplace-permissions:bundled-marketplace-staging-copy-permissions
             ''}
             test -x ${pkgs.pipewire}/lib/alsa-lib/libasound_module_pcm_pipewire.so
             ! grep -q 'LD_LIBRARY_PATH=' ${package}/bin/codex-desktop
@@ -878,10 +890,12 @@
         '';
         checks.modules = import ./nix/modules-test.nix { inherit pkgs self system; };
         checks.nix-runtime = mkRuntimeCheck "nix-runtime-check" codexDesktop true false;
+        checks.nix-runtime-computer-use =
+          mkRuntimeCheck "nix-runtime-computer-use" computerUse true false;
         checks.nix-runtime-maximal-directory-watch =
-          mkRuntimeCheck "nix-runtime-maximal-directory-watch" maximalDirectory false true;
+          mkRuntimeCheck "nix-runtime-maximal-directory-watch" maximalDirectory true true;
         checks.nix-runtime-maximal-shallow-watch =
-          mkRuntimeCheck "nix-runtime-maximal-shallow-watch" maximalShallow false false;
+          mkRuntimeCheck "nix-runtime-maximal-shallow-watch" maximalShallow true false;
         checks.nix-installer = pkgs.runCommand "nix-installer-check" {
           nativeBuildInputs = [ installer pkgs.nodejs pkgs.patchelf ];
         } ''

@@ -1,5 +1,6 @@
 {
   "enabled": [
+    "global-dictation",
     "mcp-helper-reaper",
     "node-repl-reaper",
     "tray-usage"

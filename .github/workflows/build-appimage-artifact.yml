@@ -185,16 +185,20 @@ jobs:
           make build-native-feature-helpers
           make --eval='unexport UPSTREAM_DEB' build-app
 
-      - name: Verify the clean app preserves the official ASAR
+      - name: Verify the built app
         env:
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/features.json
           UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
         run: |
           set -euo pipefail
-          upstream_root="$RUNNER_TEMP/upstream-package"
-          mkdir -p "$upstream_root"
-          dpkg-deb -x "$UPSTREAM_DEB" "$upstream_root"
-          cmp "$upstream_root/usr/lib/chatgpt/resources/app.asar" \
-            codex-app/resources/app.asar
+          descriptor_count="$(node scripts/lib/linux-features.js --patch-descriptor-count)"
+          if [ "$descriptor_count" -eq 0 ]; then
+            upstream_root="$RUNNER_TEMP/upstream-package"
+            mkdir -p "$upstream_root"
+            dpkg-deb -x "$UPSTREAM_DEB" "$upstream_root"
+            cmp "$upstream_root/usr/lib/chatgpt/resources/app.asar" \
+              codex-app/resources/app.asar
+          fi
           test -x codex-app/ChatGPT
           test -x codex-app/resources/codex
 

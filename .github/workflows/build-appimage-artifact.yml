@@ -169,7 +169,7 @@ jobs:
 
       - name: Build the community app from the verified package
         env:
-          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/features.example.json
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/features.json
           CODEX_TARGET_ARCH: amd64
           CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app
           PACKAGE_WITH_UPDATER: '0'

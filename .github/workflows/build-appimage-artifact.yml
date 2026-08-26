@@ -42,6 +42,9 @@ on:
 permissions:
   contents: write
 
+env:
+  APPIMAGE_ID: io.github.bruglet.chatgpt
+
 concurrency:
   group: build-appimage-artifact-${{ github.ref }}
   cancel-in-progress: false
@@ -182,8 +185,22 @@ jobs:
         # Keep UPSTREAM_DEB available as a Make variable, but do not export it
         # to install.sh, which also receives the package path positionally.
         run: |
+          set -euo pipefail
           make build-native-feature-helpers
-          make --eval='unexport UPSTREAM_DEB' build-app
+          # Keep the checked-out upstream helper unchanged; patch only this temp copy.
+          helper_parent="$RUNNER_TEMP/global-dictation-helper"
+          helper_source="$helper_parent/global-dictation-linux"
+          mkdir -p "$helper_source"
+          cp global-dictation-linux/Cargo.toml global-dictation-linux/Cargo.lock "$helper_source/"
+          cp -a global-dictation-linux/src "$helper_source/src"
+          git -C "$helper_parent" apply --check \
+            "$GITHUB_WORKSPACE/.github/patches/global-dictation-host-registry.patch"
+          git -C "$helper_parent" apply \
+            "$GITHUB_WORKSPACE/.github/patches/global-dictation-host-registry.patch"
+          cargo test --manifest-path "$helper_source/Cargo.toml"
+          cargo build --release --manifest-path "$helper_source/Cargo.toml"
+          CODEX_GLOBAL_DICTATION_LINUX_SOURCE="$helper_source/target/release/codex-global-dictation-linux" \
+            make --eval='unexport UPSTREAM_DEB' build-app
 
       - name: Verify the built app
         env:
@@ -191,6 +208,9 @@ jobs:
           UPSTREAM_DEB: ${{ steps.upstream.outputs.package }}
         run: |
           set -euo pipefail
+          expected_features=$'global-dictation\nmcp-helper-reaper\nnode-repl-reaper\ntray-usage'
+          actual_features="$(node scripts/lib/linux-features.js --enabled)"
+          test "$actual_features" = "$expected_features"
           descriptor_count="$(node scripts/lib/linux-features.js --patch-descriptor-count)"
           if [ "$descriptor_count" -eq 0 ]; then
             upstream_root="$RUNNER_TEMP/upstream-package"
@@ -206,8 +226,9 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           APPIMAGETOOL: ${{ steps.appimagetool.outputs.path }}
+          PACKAGE_DISPLAY_NAME: ChatGPT Community
           PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
-        run: make appimage
+        run: make appimage PACKAGE_NAME="$APPIMAGE_ID"
 
       - name: Validate AppImage and write build metadata
         id: artifact
@@ -218,7 +239,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          appimages=(dist/codex-desktop-*-x86_64.AppImage)
+          appimages=(dist/${APPIMAGE_ID}-*-x86_64.AppImage)
           if [ "${#appimages[@]}" -ne 1 ]; then
             echo "Expected exactly one x86-64 AppImage, found ${#appimages[@]}" >&2
             exit 1
@@ -237,6 +258,33 @@ jobs:
           )
           test -x "$extract_dir/squashfs-root/AppRun"
 
+          appimage_root="$extract_dir/squashfs-root/opt/$APPIMAGE_ID"
+          desktop_file="$extract_dir/squashfs-root/$APPIMAGE_ID.desktop"
+          test -f "$desktop_file"
+          test -f "$extract_dir/squashfs-root/usr/share/applications/$APPIMAGE_ID.desktop"
+          grep -Fx 'Name=ChatGPT Community' "$desktop_file"
+          grep -Fx "Icon=$APPIMAGE_ID" "$desktop_file"
+          runtime_file="$appimage_root/.codex-linux/codex-packaged-runtime.sh"
+          test -f "$runtime_file"
+          grep -Fx "    export CHROME_DESKTOP=\"${APPIMAGE_ID}.desktop\"" "$runtime_file"
+          test -x "$appimage_root/resources/native/codex-global-dictation-linux"
+          feature_report="$appimage_root/.codex-linux/build-info.json"
+          test -f "$feature_report"
+          node - "$feature_report" <<'NODE'
+          const fs = require("node:fs");
+          const [reportPath] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          const expected = [
+            "global-dictation",
+            "mcp-helper-reaper",
+            "node-repl-reaper",
+            "tray-usage",
+          ];
+          if (JSON.stringify(report.linuxFeatures?.enabled) !== JSON.stringify(expected)) {
+            throw new Error(`Packaged feature report does not match expected features: ${reportPath}`);
+          }
+          NODE
+
           mapfile -t packaged_launchers < <(
             find "$extract_dir/squashfs-root/opt" \
               -mindepth 2 -maxdepth 2 -type f -name start.sh -print
@@ -250,6 +298,7 @@ jobs:
           artifact_name="$(basename "$appimage")"
           {
             echo "repository=$GITHUB_REPOSITORY"
+            echo "app_id=$APPIMAGE_ID"
             echo "commit=$GITHUB_SHA"
             echo "upstream=https://github.com/ilysenko/codex-desktop-linux"
             echo "upstream_linux_release_id=$OFFICIAL_RELEASE_ID"

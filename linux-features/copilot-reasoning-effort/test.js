@@ -37,7 +37,7 @@ function withCapturedWarns(fn) {
   }
 }
 
-function copilotReasoningEffortSettingsFixture() {
+function retiredCopilotReasoningEffortSettingsFixture() {
   return [
     "function bwe(){let e=(0,Y.c)(3),t=wr(),{data:n,isLoading:r}=or(`copilot-default-model`),i=n??t.defaultModel,a;return e[0]!==r||e[1]!==i?(a={model:i,reasoningEffort:`medium`,profile:null,isLoading:r},e[0]=r,e[1]=i,e[2]=a):a=e[2],a}",
     "function $9(e=null){let t=j(fe),m=a?.authMethod===`copilot`,g=(0,q.useCallback)(async(t,n)=>!1,[]),c={profile:null},i=!0,r=`local`,s=`/tmp`,v=()=>{},y=()=>{};return{setModelAndReasoningEffort:(0,q.useCallback)(async(e,n)=>{try{if(await g(e,n))return;if(m){await Jn(t,`copilot-default-model`,e,{throwOnFailure:!0});return}if(h.info(`Setting default model and reasoning effort`,{safe:{newModel:e,newEffort:n,profile:c.profile}}),!i)throw Error(`Model settings host is unavailable`);await Gt(`set-default-model-config-for-host`,{hostId:r,model:e,reasoningEffort:n,profile:c.profile}),await v(),await t.query.fetch(Ss,{hostId:r,cwd:s})}catch(e){y(e)}},[m,g,c.profile,v,i,r,t,y,s])}}",
@@ -47,7 +47,7 @@ function copilotReasoningEffortSettingsFixture() {
 function currentCopilotReasoningEffortSettingsFixture() {
   return [
     "function Va(){let e=(0,Ya.c)(3),t=ua(),{data:n,isLoading:r}=hn(`copilot-default-model`),i=n??t.defaultModel,a;return e[0]!==r||e[1]!==i?(a={model:i,reasoningEffort:`medium`,profile:null,isLoading:r},e[0]=r,e[1]=i,e[2]=a):a=e[2],a}",
-    "function currentWriter(){let u=!0,l=!0,n={},m={profile:null},a=`host`,f=`/tmp`,r={cancelQueries:async()=>{},getQueryData:()=>null},E=async()=>!1,ln=async()=>{},za=()=>[],Xe={info:()=>{}},j=()=>{};return async(e,t)=>{let i=null,o;try{if(await E(e,t))return;if(u){await ln(n,`copilot-default-model`,e,{throwOnFailure:!0});return}if(!l)throw Error(`Model settings host is unavailable`);i=za(a,f);let s={hostId:a,cwd:f};await r.cancelQueries({exact:!0,queryKey:i}),o=r.getQueryData(i),Xe.info(`Setting default model and reasoning effort`,{safe:{newModel:e,newEffort:t,profile:m.profile}})}catch(e){j(e)}}}",
+    "function currentWriter(){let v=!0,a={},V=async()=>!1,Ix=async()=>{};let q=async(e,t,n)=>{let r=n===void 0?`current`:n;if(r===`current`&&await V(e,t))return!0;if(v)return await Ix(a,`copilot-default-model`,e,{throwOnFailure:!0}),!0;return!1};return q}",
   ].join("");
 }
 
@@ -57,7 +57,7 @@ function currentFilteredCopilotReasoningEffortModelListFixture() {
 
 function currentCopilotReasoningEffortUiFixture() {
   return [
-    "function pNc(){let re=!0,ie=p?.authMethod===`copilot`,ae=oAc(F,E),oe=Ric(F),se=sAc(b.reasoningEffort,ae),ce=!re&&!ie&&!0,le=w?.isModelLocked!==!0&&l!=null&&!re&&g&&!ie&&M!==`error`;let Ke={enabled:ce};m1(`composer.increaseReasoningEffort`,Ve,Ke);return jsx(CVc,{reasoningEffortDisabled:ie,showReasoningEffortControls:!0})}",
+    "function pNc(){let re=!0,ie=p?.authMethod===`copilot`,ae=oAc(F,E),oe=Ric(F),se=sAc(b.reasoningEffort,ae),ce=!re&&!x&&!ie&&!0,le=w?.isModelLocked!==!0&&l!=null&&!re&&g&&!ie&&M!==`error`;let Ke={enabled:ce};m1(`composer.increaseReasoningEffort`,Ve,Ke);return jsx(CVc,{reasoningEffortDisabled:ie,showReasoningEffortControls:!0})}",
     "function unrelatedGate(){let q=a&&b&&!0,c;return q}",
     "function KYc(){let l=c?.requiresAuth??!0,m=Fza(f),h=c?.authMethod===`copilot`;let A=o.formatMessage({id:`composer.reasoningSlashCommand.title`});let M=l&&m&&!h&&!0,N;return{enabled:M,dependencies:N}}",
     "function permissionGate(){let A=O.length>0,j=!w&&!A;return{shouldAutoDenyPermissionRequest:j}}",
@@ -100,21 +100,15 @@ function readAsset(extractedDir, name) {
   return fs.readFileSync(path.join(extractedDir, "webview", "assets", name), "utf8");
 }
 
-test("persists Copilot reasoning effort with the default Copilot model", () => {
-  const patched = applyPatchTwice(
-    applyCopilotReasoningEffortSettingsPatch,
-    copilotReasoningEffortSettingsFixture(),
+test("retired Copilot default writer is rejected byte-identically", () => {
+  const source = retiredCopilotReasoningEffortSettingsFixture();
+  const { value, warnings } = withCapturedWarns(() =>
+    applyCopilotReasoningEffortSettingsPatch(source),
   );
 
-  assert.match(patched, /or\(`copilot-default-reasoning-effort`\)/);
-  assert.match(patched, /reasoningEffort:codexCopilotReasoningEffortValue/);
-  assert.match(patched, /isLoading:r\|\|codexCopilotReasoningEffortLoading/);
-  assert.match(
-    patched,
-    /await Jn\(t,`copilot-default-model`,e,\{throwOnFailure:!0\}\);await Jn\(t,`copilot-default-reasoning-effort`,n,\{throwOnFailure:!0\}\);return/,
-  );
-  assert.doesNotMatch(patched, /reasoningEffort:`medium`,profile:null,isLoading:r/);
-  assert.doesNotMatch(patched, /await Jn\(t,`copilot-default-model`,e,\{throwOnFailure:!0\}\);return/);
+  assert.equal(value, source);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /default model writer/);
 });
 
 test("persists Copilot reasoning effort through the current default writer", () => {
@@ -123,13 +117,16 @@ test("persists Copilot reasoning effort through the current default writer", () 
     currentCopilotReasoningEffortSettingsFixture(),
   );
 
+  assert.match(patched, /hn\(`copilot-default-reasoning-effort`\)/);
+  assert.match(patched, /reasoningEffort:codexCopilotReasoningEffortValue/);
+  assert.match(patched, /isLoading:r\|\|codexCopilotReasoningEffortLoading/);
   assert.match(
     patched,
-    /await ln\(n,`copilot-default-model`,e,\{throwOnFailure:!0\}\);await ln\(n,`copilot-default-reasoning-effort`,t,\{throwOnFailure:!0\}\);return/,
+    /await Ix\(a,`copilot-default-model`,e,\{throwOnFailure:!0\}\),await Ix\(a,`copilot-default-reasoning-effort`,t,\{throwOnFailure:!0\}\),!0/,
   );
   assert.doesNotMatch(
     patched,
-    /await ln\(n,`copilot-default-model`,e,\{throwOnFailure:!0\}\);return/,
+    /await Ix\(a,`copilot-default-model`,e,\{throwOnFailure:!0\}\),!0/,
   );
 });
 
@@ -168,11 +165,11 @@ test("allows Copilot auth to use the current app effort controls", () => {
   );
 
   assert.match(patched, /ie=p\?\.authMethod===`copilot`/);
-  assert.match(patched, /ce=!re&&!0/);
+  assert.match(patched, /ce=!re&&!x&&!0/);
   assert.match(patched, /le=w\?\.isModelLocked!==!0&&l!=null&&!re&&g&&M!==`error`/);
   assert.match(patched, /reasoningEffortDisabled:!1/);
   assert.match(patched, /let A=o\.formatMessage\(\{id:`composer\.reasoningSlashCommand\.title`\}\);let M=l&&m&&!0,N;/);
-  assert.doesNotMatch(patched, /ce=!re&&!ie&&!0/);
+  assert.doesNotMatch(patched, /ce=!re&&!x&&!ie&&!0/);
   assert.doesNotMatch(patched, /&&g&&!ie&&M!==`error`/);
   assert.doesNotMatch(patched, /reasoningEffortDisabled:ie/);
   assert.doesNotMatch(patched, /M=l&&m&&!h&&!0/);

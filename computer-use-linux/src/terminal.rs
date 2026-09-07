@@ -216,33 +216,105 @@ fn process_depth(pid: u32, ancestor_pid: u32, by_pid: &HashMap<u32, &ProcessInfo
 }
 
 fn looks_like_terminal_window(window: &WindowInfo) -> bool {
-    let haystack = [
-        window.app_id.as_deref(),
-        window.wm_class.as_deref(),
-        window.title.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" ")
-    .to_ascii_lowercase();
-
-    [
-        "ghostty",
-        "gnome-terminal",
-        "org.gnome.terminal",
-        "ptyxis",
-        "org.gnome.ptyxis",
-        "kgx",
-        "konsole",
-        "kitty",
-        "alacritty",
-        "wezterm",
-        "xterm",
-    ]
-    .iter()
-    .any(|needle| haystack.contains(needle))
+    terminal_paste_shortcut(window).is_some()
+        || [window.app_id.as_deref(), window.wm_class.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(terminal_detection_hint_matches)
+        || window
+            .title
+            .as_deref()
+            .is_some_and(terminal_detection_hint_matches)
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalPasteShortcut {
+    CtrlShiftV,
+    ShiftInsert,
+}
+
+pub(crate) fn terminal_paste_shortcut(window: &WindowInfo) -> Option<TerminalPasteShortcut> {
+    [window.app_id.as_deref(), window.wm_class.as_deref()]
+        .into_iter()
+        .flatten()
+        .find_map(terminal_identity_paste_shortcut)
+}
+
+fn terminal_identity_paste_shortcut(value: &str) -> Option<TerminalPasteShortcut> {
+    let identity = value.trim().to_ascii_lowercase();
+    let identity = identity.strip_suffix(".desktop").unwrap_or(&identity);
+    if SHIFT_INSERT_TERMINAL_IDENTITIES.contains(&identity) {
+        Some(TerminalPasteShortcut::ShiftInsert)
+    } else if CTRL_SHIFT_V_TERMINAL_IDENTITIES.contains(&identity) {
+        Some(TerminalPasteShortcut::CtrlShiftV)
+    } else {
+        None
+    }
+}
+
+fn terminal_detection_hint_matches(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    TERMINAL_DETECTION_HINTS
+        .iter()
+        .any(|needle| value.contains(needle))
+}
+
+const CTRL_SHIFT_V_TERMINAL_IDENTITIES: &[&str] = &[
+    "alacritty",
+    "com.gexperts.tilix",
+    "com.mitchellh.ghostty",
+    "com.system76.cosmicterm",
+    "foot",
+    "ghostty",
+    "gnome-terminal",
+    "gnome-terminal-server",
+    "io.elementary.terminal",
+    "kitty",
+    "kgx",
+    "konsole",
+    "lxterminal",
+    "mate-terminal",
+    "org.codeberg.dnkl.foot",
+    "org.gnome.console",
+    "org.gnome.ptyxis",
+    "org.gnome.terminal",
+    "org.kde.konsole",
+    "org.kde.yakuake",
+    "org.lxqt.qterminal",
+    "org.wezfurlong.wezterm",
+    "ptyxis",
+    "qterminal",
+    "sakura",
+    "terminator",
+    "tilix",
+    "wezterm",
+    "wezterm-gui",
+    "xfce4-terminal",
+    "yakuake",
+];
+
+const SHIFT_INSERT_TERMINAL_IDENTITIES: &[&str] = &[
+    "koi8rxterm",
+    "rxvt",
+    "rxvt-unicode",
+    "urxvt",
+    "uxterm",
+    "xterm",
+];
+
+const TERMINAL_DETECTION_HINTS: &[&str] = &[
+    "alacritty",
+    "ghostty",
+    "gnome terminal",
+    "gnome-terminal",
+    "org.gnome.terminal",
+    "kgx",
+    "konsole",
+    "kitty",
+    "ptyxis",
+    "wezterm",
+    "xterm",
+];
 
 fn read_process_table() -> Vec<ProcessInfo> {
     let Ok(entries) = fs::read_dir("/proc") else {
@@ -417,6 +489,146 @@ mod tests {
         enrich_terminal_windows_with_processes(&mut windows, &processes);
 
         assert!(windows.iter().all(|window| window.terminal.is_none()));
+    }
+
+    #[test]
+    fn terminal_paste_identity_matching_is_exact() {
+        let mut window = terminal_window(11, 100);
+        window.app_id = Some("com.example.footnotes".to_string());
+        window.wm_class = Some("kitty-helper".to_string());
+
+        assert_eq!(terminal_paste_shortcut(&window), None);
+    }
+
+    #[test]
+    fn terminal_detection_preserves_legacy_identity_substrings() {
+        for identity in [
+            "custom-ghostty-profile",
+            "gnome-terminal-preview",
+            "org.gnome.Terminal.Devel",
+            "kgx-helper",
+            "KOI8RXTerm",
+        ] {
+            assert!(
+                terminal_detection_hint_matches(identity),
+                "did not recognize legacy terminal hint in {identity}"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_paste_maps_common_terminal_identities() {
+        for (identity, expected) in [
+            ("org.kde.konsole", TerminalPasteShortcut::CtrlShiftV),
+            ("org.gnome.Terminal", TerminalPasteShortcut::CtrlShiftV),
+            ("org.gnome.Ptyxis", TerminalPasteShortcut::CtrlShiftV),
+            ("kgx", TerminalPasteShortcut::CtrlShiftV),
+            ("uxterm", TerminalPasteShortcut::ShiftInsert),
+            ("xterm", TerminalPasteShortcut::ShiftInsert),
+            ("xfce4-terminal", TerminalPasteShortcut::CtrlShiftV),
+            (
+                "org.codeberg.dnkl.foot.desktop",
+                TerminalPasteShortcut::CtrlShiftV,
+            ),
+        ] {
+            let mut window = terminal_window(11, 100);
+            window.app_id = Some(identity.to_string());
+            window.wm_class = None;
+            assert_eq!(
+                terminal_paste_shortcut(&window),
+                Some(expected),
+                "did not recognize {identity}"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_paste_accepts_known_wm_class_but_not_pty_metadata_alone() {
+        let mut window = terminal_window(11, 100);
+        window.app_id = None;
+        window.wm_class = Some("qterminal".to_string());
+        assert_eq!(
+            terminal_paste_shortcut(&window),
+            Some(TerminalPasteShortcut::CtrlShiftV)
+        );
+
+        window.wm_class = None;
+        window.terminal = Some(TerminalWindowContext {
+            tty: "/dev/pts/11".to_string(),
+            root_process: TerminalProcess {
+                pid: 200,
+                command_name: "bash".to_string(),
+                command_line: "bash".to_string(),
+                cwd: Some("/home/user".to_string()),
+            },
+            active_process: None,
+            process_count: 1,
+            confidence: "high".to_string(),
+            match_reason: "test".to_string(),
+        });
+        assert_eq!(terminal_paste_shortcut(&window), None);
+    }
+
+    #[test]
+    fn enrichment_preserves_xterm_class_variants() {
+        let mut window = terminal_window(11, 100);
+        window.title = Some("user@host: ~".to_string());
+        window.app_id = Some("custom-instance".to_string());
+        window.wm_class = Some("KOI8RXTerm".to_string());
+        let mut windows = vec![window];
+        let processes = vec![
+            process(100, 1, 1, "xterm", None),
+            process(200, 100, 10, "bash", Some("/dev/pts/0")),
+        ];
+
+        enrich_terminal_windows_with_processes(&mut windows, &processes);
+
+        assert_eq!(windows[0].terminal.as_ref().unwrap().tty, "/dev/pts/0");
+        assert_eq!(
+            terminal_paste_shortcut(&windows[0]),
+            Some(TerminalPasteShortcut::ShiftInsert)
+        );
+    }
+
+    #[test]
+    fn pty_metadata_does_not_imply_a_terminal_paste_capability() {
+        let mut window = terminal_window(11, 100);
+        window.title = Some("xterm integration test".to_string());
+        window.app_id = Some("example-ide".to_string());
+        window.wm_class = Some("ExampleIde".to_string());
+        let mut windows = vec![window];
+        let processes = vec![
+            process(100, 1, 1, "example-ide", None),
+            process(200, 100, 10, "bash", Some("/dev/pts/0")),
+        ];
+
+        enrich_terminal_windows_with_processes(&mut windows, &processes);
+
+        assert!(windows[0].terminal.is_some());
+        assert_eq!(terminal_paste_shortcut(&windows[0]), None);
+    }
+
+    #[test]
+    fn enriches_x11_ghostty_with_custom_class_and_plain_title() {
+        let mut window = terminal_window(11, 100);
+        window.title = Some("igor@host: ~".to_string());
+        window.app_id = Some("ghostty".to_string());
+        window.wm_class = Some("my-custom-terminal".to_string());
+        window.client_type = Some("x11".to_string());
+        let mut windows = vec![window];
+        let processes = vec![
+            process(100, 1, 1, "ghostty", None),
+            process(200, 100, 10, "bash", Some("/dev/pts/0")),
+        ];
+
+        enrich_terminal_windows_with_processes(&mut windows, &processes);
+
+        let terminal = windows[0]
+            .terminal
+            .as_ref()
+            .expect("Ghostty's default X11 instance should preserve PTY enrichment");
+        assert_eq!(terminal.tty, "/dev/pts/0");
+        assert_eq!(terminal.confidence, "high");
     }
 
     #[test]

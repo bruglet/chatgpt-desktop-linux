@@ -163,6 +163,41 @@ test("main handler does not capture a function-local child-process alias from an
   assert.doesNotMatch(patched, /let child=__codexChild\.spawn\(command,args/);
 });
 
+for (const [label, prefix] of [
+  ["Record & Replay helper", require("../record-and-replay/patch.js").recordReplayHelperSource({
+    fsVar: "require(`node:fs`)", pathVar: "require(`node:path`)",
+  }) + 'let f=require(`node:fs`),p=require(`node:path`),o=require(`node:os`);'],
+  ["nested builtin aliases", 'function injectedFeature(){let nestedFs=require(`node:fs`),nestedPath=require(`node:path`),nestedOs=require(`node:os`);return [nestedFs,nestedPath,nestedOs]}'],
+  ["local-name collisions", 'let e=require(`node:fs`),n=require(`node:path`),t=require(`node:os`);'],
+  ["no existing builtin aliases", ""],
+]) {
+  test(`main helper resolves builtins independently of ${label}`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-read-aloud-alias-"));
+    try {
+      const source = prefix + 'var h={handlers:{"set-vs-context":async()=>{},"native-desktop-apps":async()=>({apps:[]})}};';
+      const patched = twice(applyMainBundlePatch, source);
+      const runtime = new Function("require", "process", `${patched};return {
+        home:codexLinuxReadAloudHome,
+        settingsPath:codexLinuxReadAloudSettingsPath,
+        writeSettings:codexLinuxReadAloudWriteSettings,
+        settings:codexLinuxReadAloudSettings,
+        model:codexLinuxReadAloudKokoroModel,
+        python:codexLinuxReadAloudKokoroPython
+      };`)(name => name === "node:os" ? { homedir: () => root } : require(name), {
+        platform: "linux", env: {},
+      });
+      assert.equal(runtime.home(), root);
+      assert.equal(runtime.settingsPath(), path.join(root, ".config", "codex-desktop", "settings.json"));
+      runtime.writeSettings({ "codex-linux-read-aloud-enabled": true });
+      assert.deepEqual(runtime.settings(), { "codex-linux-read-aloud-enabled": true });
+      assert.equal(runtime.model(), path.join(root, ".local", "share", "kokoro", "kokoro-v1.0.onnx"));
+      assert.equal(runtime.python(), path.join(root, ".local", "share", "codex-desktop", "read-aloud", "kokoro-venv", "bin", "python"));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("main bundle helper preserves the official Electron binding across patch reruns", () => {
   const source = [
     '"use strict";',

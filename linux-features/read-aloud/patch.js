@@ -45,14 +45,10 @@ function applyMainBundlePatch(source) {
   }
 
   const childProcessVar = "require(`node:child_process`)";
-  const fsVar = requireName(source, "node:fs");
-  const pathVar = requireName(source, "node:path");
-  const osVar = requireName(source, "node:os") ?? requireName(source, "os");
+  const fsVar = "require(`node:fs`)";
+  const pathVar = "require(`node:path`)";
+  const osVar = "require(`node:os`)";
   const electronVar = requireName(source, "electron");
-  if (fsVar == null || pathVar == null || osVar == null) {
-    warn("Could not find node:fs/node:path/node:os dependencies", "read aloud main-bundle patch");
-    return source;
-  }
 
   const helper = [
     `function codexLinuxReadAloudCleanText(e){return typeof e!==\`string\`?\`\`:e.replace(/\\r\\n/g,\`\\n\`).replace(new RegExp(\`\\\`\\\`\\\`[\\\\s\\\\S]*?\\\`\\\`\\\`\`,\`gu\`),\` code block. \`).replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/gu,\`$1\`).replace(/[*_#>~]/gu,\`\`).replace(/\\n{3,}/gu,\`\\n\\n\`).trim().slice(0,8e3)}`,

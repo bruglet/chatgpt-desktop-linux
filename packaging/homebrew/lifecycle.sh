@@ -35,11 +35,7 @@ p.write_text(text)
 PY
 brew install --cask "$token" 2>&1 | tee "$LOGS/install.log"
 cp "$RUNNER_TEMP/current.rb" "$TAP_DIR/Casks/chatgpt-community.rb"
-brew outdated --cask --json=v2 "$token" > "$LOGS/upstream-outdated.json"
-python3 - "$LOGS/upstream-outdated.json" <<'PY'
-import json,sys
-assert json.load(open(sys.argv[1]))['casks'], 'Ordinary upgrade skipped OpenAI version'
-PY
+python3 "$ROOT/packaging/homebrew/check-outdated.py" "$token" "$LOGS/upstream-outdated.json"
 brew upgrade --cask "$token" 2>&1 | tee "$LOGS/upstream-upgrade.log"
 "$(brew --prefix)/bin/codex-desktop" --diagnose
 test -f "$XDG_DATA_HOME/applications/codex-desktop.desktop"
@@ -59,11 +55,7 @@ r=json.load(open(sys.argv[1])); r['revision'] += 1
 json.dump(r,open(sys.argv[2],'w'))
 PY
 python3 "$ROOT/packaging/homebrew/render-cask.py" "$RUNNER_TEMP/revision.json" "$TAP_DIR/Casks/chatgpt-community.rb"
-brew outdated --cask --json=v2 "$token" > "$LOGS/outdated.json"
-python3 - "$LOGS/outdated.json" <<'PY'
-import json,sys
-assert json.load(open(sys.argv[1]))['casks'], 'Ordinary upgrade skipped downstream revision'
-PY
+python3 "$ROOT/packaging/homebrew/check-outdated.py" "$token" "$LOGS/outdated.json"
 brew upgrade --cask "$token" 2>&1 | tee "$LOGS/upgrade.log"
 grep -F 'Reusing helper' "$LOGS/upgrade.log"
 "$(brew --prefix)/bin/codex-desktop" --diagnose

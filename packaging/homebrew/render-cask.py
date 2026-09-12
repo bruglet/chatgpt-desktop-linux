@@ -56,7 +56,7 @@ end
   depends_on linux: :any
   container type: :naked
 
-  data_home = (ENV["HOMEBREW_XDG_DATA_HOME"] || ENV["XDG_DATA_HOME"]).to_s
+  data_home = (ENV["HOMEBREW_XDG_DATA_HOME"] || ENV.fetch("XDG_DATA_HOME", nil)).to_s
   data_home = "#{{Dir.home}}/.local/share" unless data_home.start_with?("/")
   desktop_file = "#{{data_home}}/applications/codex-desktop.desktop"
 

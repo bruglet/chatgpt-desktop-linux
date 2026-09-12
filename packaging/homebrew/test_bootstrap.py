@@ -50,6 +50,26 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue((self.stage / "prepared/integration").is_dir())
         self.assertFalse((self.stage / "source").exists())
 
+    def test_rollback_reprepares_existing_payload(self):
+        self.bundle(b'#!/bin/bash\ntest ! -e "$3" || exit 1\nmkdir -p "$3/integration"\n')
+        first = self.run_bootstrap()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        (self.stage / "prepared/stale").write_text("old")
+        second = self.run_bootstrap()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertTrue((self.stage / "prepared/integration").is_dir())
+        self.assertFalse((self.stage / "prepared/stale").exists())
+
+    def test_failed_repreparation_preserves_previous_payload(self):
+        self.bundle(b'#!/bin/bash\nmkdir -p "$3"\nexit 42\n')
+        previous = self.stage / "prepared"
+        previous.mkdir()
+        (previous / "keep").write_text("previous payload")
+        result = self.run_bootstrap()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((previous / "keep").read_text(), "previous payload")
+        self.assertEqual(list(self.stage.glob(".homebrew-bootstrap-*")), [])
+
     def test_source_checksum_failure_never_runs_adapter(self):
         archive = self.bundle()
         archive.write_bytes(b"wrong source")

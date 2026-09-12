@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
 import sys
 import tarfile
 import tempfile
@@ -59,6 +60,16 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertTrue((self.stage / "prepared/integration").is_dir())
         self.assertFalse((self.stage / "prepared/stale").exists())
+
+    def test_rollback_makes_saved_command_wrapper_writable(self):
+        self.bundle()
+        wrapper = self.stage / ".homebrew-command-wrappers/codex-desktop"
+        wrapper.parent.mkdir()
+        wrapper.write_text("saved wrapper")
+        wrapper.chmod(0o555)
+        result = self.run_bootstrap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(wrapper.stat().st_mode & stat.S_IWUSR)
 
     def test_failed_repreparation_preserves_previous_payload(self):
         self.bundle(b'#!/bin/bash\nmkdir -p "$3"\nexit 42\n')

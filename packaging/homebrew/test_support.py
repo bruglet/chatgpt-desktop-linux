@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -139,6 +140,24 @@ binary.chmod(0o755)
         self.assertNotEqual(failed.returncode, 0)
         entries = [p for p in (self.root / "cache/helpers").iterdir() if p.is_dir()]
         self.assertEqual(len(entries), 1)
+
+    def test_helper_rebuilds_file_and_symlink_cache_entries(self):
+        tools, crate = self.make_compiler()
+        cache = self.root / "cache"
+        with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"]):
+            binary = support.helper(crate, cache)
+            entry = binary.parent
+            shutil.rmtree(entry)
+            entry.write_text("incomplete cache entry")
+            self.assertTrue(support.helper(crate, cache).is_file())
+
+            shutil.rmtree(entry)
+            unrelated = self.root / "unrelated"
+            unrelated.mkdir()
+            entry.symlink_to(unrelated, target_is_directory=True)
+            self.assertTrue(support.helper(crate, cache).is_file())
+            self.assertTrue(unrelated.is_dir())
+            self.assertEqual((self.root / "builds").read_text().count("build"), 3)
 
     def test_cache_architecture_is_part_of_identity(self):
         root = self.root / "crate"

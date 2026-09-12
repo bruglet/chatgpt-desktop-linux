@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,15 @@ import tempfile
 
 stage = Path(__file__).resolve().parent
 prefix = Path(sys.argv[1])
+# Homebrew stores command wrappers as read-only files. During rollback it restores
+# the predecessor's stage, reruns this preflight, and then rewrites that wrapper.
+wrapper = stage / ".homebrew-command-wrappers/codex-desktop"
+if wrapper.is_symlink():
+    raise ValueError("Command wrapper must not be a symlink")
+if wrapper.exists():
+    if not wrapper.is_file():
+        raise ValueError("Command wrapper must be a regular file")
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IWUSR)
 release = json.loads((stage / "release.json").read_text())
 source = release["source"]
 archive = stage / "source.tar.gz"

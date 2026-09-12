@@ -95,10 +95,17 @@ def helper_key(crate, arch, compiler, linker):
 
 
 def cached_helper_valid(entry):
-    binary = Path(entry) / "codex-mcp-helper-reaper"
-    checksum = Path(entry) / "sha256"
-    return (binary.is_file() and not binary.is_symlink() and os.access(binary, os.X_OK)
-            and checksum.is_file() and digest(binary) == checksum.read_text().strip())
+    entry = Path(entry)
+    if entry.is_symlink() or not entry.is_dir():
+        return False
+    binary = entry / "codex-mcp-helper-reaper"
+    checksum = entry / "sha256"
+    try:
+        return (binary.is_file() and not binary.is_symlink() and os.access(binary, os.X_OK)
+                and checksum.is_file() and not checksum.is_symlink()
+                and digest(binary) == checksum.read_text().strip())
+    except (OSError, UnicodeError):
+        return False
 
 
 def helper(crate, cache):
@@ -116,7 +123,9 @@ def helper(crate, cache):
             if cached_helper_valid(entry):
                 print(f"Reusing helper {key}", file=sys.stderr)
                 return entry / "codex-mcp-helper-reaper"
-            if entry.exists():
+            if entry.is_symlink() or (entry.exists() and not entry.is_dir()):
+                entry.unlink()
+            elif entry.exists():
                 shutil.rmtree(entry)
             with tempfile.TemporaryDirectory(dir=entry.parent, prefix="build-") as temporary:
                 temporary = Path(temporary)

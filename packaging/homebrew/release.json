@@ -1,5 +1,50 @@
 {
   "schemaVersion": 1,
-  "ready": false,
-  "reason": "The first source commit must be available on GitHub before Homebrew validation can pin its archive."
+  "ready": true,
+  "version": "26.908.40834",
+  "revision": 1,
+  "sourceInputSha256": "6d580ac72726bc021b4c1c393742be41b8dc22d2b5c6e58382892084bd1a8090",
+  "source": {
+    "commit": "e624df7e3e3de1e11da5e5eebcfff17497d8ea0a",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/e624df7e3e3de1e11da5e5eebcfff17497d8ea0a.tar.gz",
+    "sha256": "f6414ea1e1f390ade12664fa3453b5a24097b141e3f2266d9b948249f02d9db8"
+  },
+  "campaign": {
+    "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
+    "version": "26.908.40834",
+    "packages": {
+      "amd64": {
+        "architecture": "amd64",
+        "version": "26.908.40834",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.908.40834_amd64.deb",
+        "sha256": "da37b8e7bcefaaea019c478cacbe6c73ee1ddd15e0e1ebb3c7ef0a42dd818ac2",
+        "size": 399596414
+      },
+      "arm64": {
+        "architecture": "arm64",
+        "version": "26.908.40834",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.908.40834_arm64.deb",
+        "sha256": "bae5c5ca585625a116a8877dedc455e4c27ca02063ea93dbd6a0506ed6a12d31",
+        "size": 379218726
+      }
+    },
+    "releaseId": "d46153659a7cfa05b113fe80952feec0b7b43676e17f7fd23128c1951e4e59c8"
+  },
+  "features": {
+    "enabled": [
+      "mcp-helper-reaper",
+      "node-repl-reaper",
+      "tray-usage"
+    ]
+  },
+  "packages": {
+    "amd64": {
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.908.40834-1.x86_64.rpm",
+      "sha256": "fc63bde0c514e2066d2ce213ec5f1bf59622f436cb7721561a5f923aeacf3657"
+    },
+    "arm64": {
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.908.40834-1.aarch64.rpm",
+      "sha256": "f51e07cd889df4a8b7164f82d943cb3dfa4b34c77684eaf38bd8abb780211950"
+    }
+  }
 }

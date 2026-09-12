@@ -209,11 +209,13 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `computer-use-linux` | Linux desktop-control UI 与原生 MCP backend | [文档](linux-features/computer-use-linux/README.md) |
 | `copilot-reasoning-effort` | Copilot auth 的 reasoning-effort 默认值 | [文档](linux-features/copilot-reasoning-effort/README.md) |
 | `directory-only-working-tree-watch` | 有界 Watchbound 工作树监听 | [文档](linux-features/directory-only-working-tree-watch/README.md) |
+| `filesystem-root-follow-ups` | 允许工作目录为 `/` 的现有本地任务继续发送消息 | [文档](linux-features/filesystem-root-follow-ups/README.md) |
 | `flatpak-chrome-native-messaging` | 将官方 Chrome 扩展连接到 Flatpak Google Chrome | [文档](linux-features/flatpak-chrome-native-messaging/README.md) |
 | `frameless-titlebar` | 隐藏官方 Linux overlay 按钮，改由 compositor 管理窗口装饰 | [文档](linux-features/frameless-titlebar/README.md) |
 | `global-dictation` | X11 / XDG portal 全局听写快捷键 | [文档](linux-features/global-dictation/README.md) |
 | `linux-performance-workarounds` | 针对受影响系统的 renderer workaround | [文档](linux-features/linux-performance-workarounds/README.md) |
 | `mcp-helper-reaper` | 安全清理孤立 MCP helper | [文档](linux-features/mcp-helper-reaper/README.md) |
+| `model-picker-default-presets` | 配置 ChatGPT Default 的有序 model/effort 组合 | [文档](linux-features/model-picker-default-presets/README.md) |
 | `node-repl-reaper` | 清理 owner 退出后泄漏的 Browser Use `node_repl` | [文档](linux-features/node-repl-reaper/README.md) |
 | `omarchy-theme` | 加载当前 Omarchy 主题生成的 CSS | [文档](linux-features/omarchy-theme/README.md) |
 | `persistent-status-panel` | 在线程切换和重启后保留 `/status` panel | [文档](linux-features/persistent-status-panel/README.md) |
@@ -230,6 +232,10 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `thorium-chrome-plugin` | 为官方 Chrome integration 添加 Thorium | [文档](linux-features/thorium-chrome-plugin/README.md) |
 | `tray-usage` | 在 Linux 系统托盘菜单显示剩余用量 | [文档](linux-features/tray-usage/README.md) |
 | `ui-tweaks` | 可选 UI 与交互自定义 | [文档](linux-features/ui-tweaks/README.md) |
+
+启用 `shared-app-server-socket` 并保持 Desktop 运行后，可使用
+`codex-desktop --cli` 将 Codex CLI 连接到 Desktop 的 app-server。详见
+[CLI 连接说明](linux-features/shared-app-server-socket/README.md#attached-cli)。
 
 ChatGPT account rollout 和 server-side 功能仍由 OpenAI 控制。重新构建本项目
 不会解锁账号功能。

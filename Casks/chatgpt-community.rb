@@ -3,9 +3,9 @@ cask "chatgpt-community" do
   arch arm: "aarch64", intel: "x86_64"
   os linux: "linux"
 
-  version "26.901.51231,0"
-  sha256 arm64_linux:  "b86d3070b7c9c4968798b866a0117bef4cebb9ab6bb6d84111582d5976a6faca",
-         x86_64_linux: "5769e86e439303e58b07d9cc51a1f03c6bf0a9f9b4fa8bcd2c4553da6e025c23"
+  version "26.908.40834,1"
+  sha256 arm64_linux:  "f51e07cd889df4a8b7164f82d943cb3dfa4b34c77684eaf38bd8abb780211950",
+         x86_64_linux: "fc63bde0c514e2066d2ce213ec5f1bf59622f436cb7721561a5f923aeacf3657"
 
   url "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/#{arch}/chatgpt-#{version.csv.first}-1.#{arch}.rpm"
   name "ChatGPT Community"
@@ -16,9 +16,159 @@ cask "chatgpt-community" do
     skip "Versions require downstream patch validation on both Linux architectures"
   end
 
-  disable! date: "2026-09-09", because: "the first pinned source release awaits Homebrew validation"
-
+  depends_on formula: "cpio"
+  depends_on formula: "curl"
+  depends_on formula: "node@24"
+  depends_on formula: "python@3.14"
+  depends_on formula: "rpm2cpio"
+  depends_on formula: "rust"
   depends_on linux: :any
+  container type: :naked
 
-  stage_only true
+  data_home = (ENV["HOMEBREW_XDG_DATA_HOME"] || ENV.fetch("XDG_DATA_HOME", nil)).to_s
+  data_home = "#{Dir.home}/.local/share" unless data_home.start_with?("/")
+  desktop_file = "#{data_home}/applications/codex-desktop.desktop"
+
+  command_wrapper "codex-desktop",
+                  executable: "#{staged_path}/prepared/app/start.sh",
+                  env:        { "BAMF_DESKTOP_FILE_HINT" => desktop_file }
+  artifact "prepared/integration/codex-desktop.desktop",
+           target: desktop_file
+  artifact "prepared/integration/codex-desktop.png",
+           target: "#{data_home}/icons/codex-desktop.png"
+
+  preflight_steps do
+    write_file "release.json", <<~JSON
+      {
+        "schemaVersion": 1,
+        "ready": true,
+        "version": "26.908.40834",
+        "revision": 1,
+        "sourceInputSha256": "6d580ac72726bc021b4c1c393742be41b8dc22d2b5c6e58382892084bd1a8090",
+        "source": {
+          "commit": "e624df7e3e3de1e11da5e5eebcfff17497d8ea0a",
+          "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/e624df7e3e3de1e11da5e5eebcfff17497d8ea0a.tar.gz",
+          "sha256": "f6414ea1e1f390ade12664fa3453b5a24097b141e3f2266d9b948249f02d9db8"
+        },
+        "campaign": {
+          "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
+          "version": "26.908.40834",
+          "packages": {
+            "amd64": {
+              "architecture": "amd64",
+              "version": "26.908.40834",
+              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.908.40834_amd64.deb",
+              "sha256": "da37b8e7bcefaaea019c478cacbe6c73ee1ddd15e0e1ebb3c7ef0a42dd818ac2",
+              "size": 399596414
+            },
+            "arm64": {
+              "architecture": "arm64",
+              "version": "26.908.40834",
+              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.908.40834_arm64.deb",
+              "sha256": "bae5c5ca585625a116a8877dedc455e4c27ca02063ea93dbd6a0506ed6a12d31",
+              "size": 379218726
+            }
+          },
+          "releaseId": "d46153659a7cfa05b113fe80952feec0b7b43676e17f7fd23128c1951e4e59c8"
+        },
+        "features": {
+          "enabled": [
+            "mcp-helper-reaper",
+            "node-repl-reaper",
+            "tray-usage"
+          ]
+        },
+        "packages": {
+          "amd64": {
+            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.908.40834-1.x86_64.rpm",
+            "sha256": "fc63bde0c514e2066d2ce213ec5f1bf59622f436cb7721561a5f923aeacf3657"
+          },
+          "arm64": {
+            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.908.40834-1.aarch64.rpm",
+            "sha256": "f51e07cd889df4a8b7164f82d943cb3dfa4b34c77684eaf38bd8abb780211950"
+          }
+        }
+      }
+    JSON
+    write_file "bootstrap.py", <<~PYTHON
+      """Cask bootstrap: verify pinned source before running the RPM adapter."""
+      import hashlib
+      import json
+      import os
+      import shutil
+      import stat
+      from pathlib import Path
+      import subprocess
+      import sys
+      import tarfile
+      import tempfile
+
+      stage = Path(__file__).resolve().parent
+      prefix = Path(sys.argv[1])
+      # Homebrew stores command wrappers as read-only files. During rollback it restores
+      # the predecessor's stage, reruns this preflight, and then rewrites that wrapper.
+      wrapper = stage / ".homebrew-command-wrappers/codex-desktop"
+      if wrapper.is_symlink():
+          raise ValueError("Command wrapper must not be a symlink")
+      if wrapper.exists():
+          if not wrapper.is_file():
+              raise ValueError("Command wrapper must be a regular file")
+          wrapper.chmod(wrapper.stat().st_mode | stat.S_IWUSR)
+      release = json.loads((stage / "release.json").read_text())
+      source = release["source"]
+      archive = stage / "source.tar.gz"
+      subprocess.run([str(prefix / "bin/curl"), "--fail", "--location", "--proto", "=https",
+                      "--tlsv1.2", "--retry", "3", "--output", str(archive), source["url"]], check=True)
+      with archive.open("rb") as stream:
+          if hashlib.file_digest(stream, "sha256").hexdigest() != source["sha256"]:
+              raise ValueError("Source archive SHA-256 mismatch")
+      source_root = stage / "source"
+      source_root.mkdir()
+      with tarfile.open(archive) as bundle:
+          bundle.extractall(source_root, filter="data")
+      roots = list(source_root.iterdir())
+      if len(roots) != 1 or not roots[0].is_dir():
+          raise ValueError("Expected one source archive root")
+      rpms = list(stage.glob("*.rpm"))
+      if len(rpms) != 1:
+          raise ValueError("Expected one staged RPM")
+      env = dict(os.environ)
+      env["PATH"] = os.pathsep.join([str(prefix / "opt/node@24/bin"), str(prefix / "opt/python@3.14/libexec/bin"),
+                                    str(prefix / "bin"), "/usr/bin", "/bin"])
+      # Use Homebrew's sandbox-approved cache, not the user's Cargo/npm directories.
+      cache = Path(subprocess.check_output([str(prefix / "bin/brew"), "--cache"], text=True).strip())
+      # Homebrew reruns the predecessor's preflight when reverting an upgrade.
+      # Build in a fresh directory, keeping the prior payload until preparation succeeds.
+      with tempfile.TemporaryDirectory(prefix=".homebrew-bootstrap-", dir=stage) as work:
+          prepared = Path(work) / "prepared"
+          subprocess.run(["/bin/bash", str(roots[0] / "packaging/homebrew/prepare.sh"), str(rpms[0]),
+                          str(stage / "release.json"), str(prepared), str(prefix),
+                          str(cache / "chatgpt-community")], env=env, check=True)
+          previous = stage / "prepared"
+          if previous.is_symlink():
+              raise ValueError("Prepared output must not be a symlink")
+          if previous.exists():
+              previous.rename(Path(work) / "previous")
+          try:
+              prepared.rename(previous)
+          except OSError:
+              backup = Path(work) / "previous"
+              if backup.exists():
+                  backup.rename(previous)
+              raise
+      # The installed payload and reports suffice for launch and uninstall.
+      shutil.rmtree(source_root)
+      archive.unlink()
+    PYTHON
+    run "{{HOMEBREW_PREFIX}}/opt/python@3.14/bin/python3.14",
+        args:           ["{{staged_path}}/bootstrap.py", "{{HOMEBREW_PREFIX}}"],
+        chdir:          "{{staged_path}}",
+        network_access: true
+  end
+
+  caveats <<~EOS
+    Homebrew manages updates. Close ChatGPT before upgrading or reinstalling.
+    Shared ChatGPT/Codex profiles are retained on uninstall.
+    The Electron sandbox requires host support for unprivileged user namespaces.
+  EOS
 end

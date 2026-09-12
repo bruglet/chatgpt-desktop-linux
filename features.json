@@ -2,6 +2,7 @@
   "enabled": [
     "mcp-helper-reaper",
     "node-repl-reaper",
-    "tray-usage"
+    "tray-usage",
+    "pet-overlay"
   ]
 }

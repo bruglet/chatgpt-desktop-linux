@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "ready": false,
+  "reason": "The first source commit must be available on GitHub before Homebrew validation can pin its archive."
+}

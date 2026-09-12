@@ -1,0 +1,122 @@
+name: Update Homebrew Cask
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - Casks/**
+      - packaging/homebrew/release.json
+  schedule:
+    - cron: '43 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: homebrew-update
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == 'bruglet/chatgpt-desktop-linux'
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+      source_sha: ${{ steps.candidate.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - run: sudo apt-get update && sudo apt-get install -y gnupg
+      - name: Resolve pinned source and signed campaign
+        id: candidate
+        run: |
+          python3 packaging/homebrew/candidate.py "$RUNNER_TEMP/candidate"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [ -f "$RUNNER_TEMP/candidate/release.json" ]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: steps.candidate.outputs.changed == 'true'
+        with:
+          name: homebrew-candidate
+          path: |
+            ${{ runner.temp }}/candidate/release.json
+            ${{ runner.temp }}/candidate/chatgpt-community.rb
+          if-no-files-found: error
+
+  validate:
+    needs: candidate
+    if: needs.candidate.outputs.changed == 'true'
+    uses: ./.github/workflows/homebrew-ci.yml
+    with:
+      candidate: true
+      source_sha: ${{ needs.candidate.outputs.source_sha }}
+
+  publish:
+    needs: [candidate, validate]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: homebrew-candidate
+          path: candidate
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - run: sudo apt-get update && sudo apt-get install -y gnupg
+      - name: Reject stale source or campaign
+        env:
+          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node scripts/automation/upstream-linux-package-watchdog/watchdog.js --json > "$RUNNER_TEMP/campaign.json"
+          python3 - candidate/release.json "$RUNNER_TEMP/campaign.json" <<'PY'
+          import json,sys
+          release, current = [json.load(open(p)) for p in sys.argv[1:]]
+          assert release['campaign']['releaseId'] == current['release']['releaseId'], 'Signed campaign changed'
+          PY
+      - name: Open validated cask update PR
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          branch=automation/homebrew-cask
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git switch -C "$branch"
+          cp candidate/release.json packaging/homebrew/release.json
+          cp candidate/chatgpt-community.rb Casks/chatgpt-community.rb
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packaging/homebrew/release.json Casks/chatgpt-community.rb
+          git commit -m 'Update validated Homebrew cask'
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$SOURCE_SHA"
+          git push --force-with-lease origin "HEAD:refs/heads/$branch"
+          python3 - <<'PY' > "$RUNNER_TEMP/pr-body.md"
+          import json
+          r = json.load(open('candidate/release.json'))
+          print(f"Install OpenAI {r['version']} with downstream revision {r['revision']} through Homebrew.\n")
+          print(f"Source commit: `{r['source']['commit']}`.\n")
+          print('Both Linux architectures passed signed DEB/RPM comparison and sandboxed Homebrew lifecycle tests.')
+          PY
+          pr=$(gh pr list --head "$branch" --base main --json url --jq '.[0].url // empty')
+          if [ -z "$pr" ]; then
+            pr=$(gh pr create --head "$branch" --base main --title 'Update ChatGPT Community Homebrew cask' --body-file "$RUNNER_TEMP/pr-body.md")
+          else
+            gh pr edit "$pr" --body-file "$RUNNER_TEMP/pr-body.md"
+          fi
+          gh pr merge "$pr" --auto --merge

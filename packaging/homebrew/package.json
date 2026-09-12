@@ -1,0 +1,8 @@
+{
+  "name": "chatgpt-community-homebrew-tools",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@electron/asar": "4.3.0"
+  }
+}

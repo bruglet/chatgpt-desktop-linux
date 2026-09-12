@@ -1,0 +1,103 @@
+name: Homebrew CI
+
+on:
+  pull_request:
+    paths:
+      - Casks/**
+      - packaging/homebrew/**
+      - .github/workflows/homebrew-*.yml
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      candidate:
+        type: boolean
+        default: false
+      source_sha:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: Homebrew/actions/setup-homebrew@3cdb78d0f62ad29dd32de765782654f4eedea607
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev gnupg rpm cpio xvfb xdotool dbus-x11 libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+      - name: Verify additive upstream boundary
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 packaging/homebrew/test_boundary.py "$BASE_SHA"
+      - name: Unit and upstream regression tests
+        run: |
+          python3 -m unittest discover -s packaging/homebrew -p 'test_*.py'
+          bash -n packaging/homebrew/*.sh
+          node --test launcher/start.test.js scripts/lib/linux-features.test.js scripts/patch-linux-window-ui.test.js linux-features/tray-usage/test.js linux-features/mcp-helper-reaper/test.js linux-features/node-repl-reaper/test.js
+          python3 packaging/homebrew/render-cask.py packaging/homebrew/release.json "$RUNNER_TEMP/expected.rb"
+          cmp Casks/chatgpt-community.rb "$RUNNER_TEMP/expected.rb"
+          brew style Casks/chatgpt-community.rb
+      - name: Download candidate
+        if: inputs.candidate
+        uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: homebrew-candidate
+          path: candidate
+      - name: Select release manifest
+        id: release
+        run: |
+          manifest=packaging/homebrew/release.json
+          if [ -f candidate/release.json ]; then manifest=candidate/release.json; fi
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+          echo "ready=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["ready"]).lower())' "$manifest")" >> "$GITHUB_OUTPUT"
+      - name: Verify signed DEB and RPM equivalence
+        if: steps.release.outputs.ready == 'true'
+        run: |
+          python3 - '${{ steps.release.outputs.manifest }}' <<'PY'
+          import json,sys
+          from pathlib import Path
+          sys.path.insert(0, 'packaging/homebrew')
+          from candidate import input_hash
+          release = json.load(open(sys.argv[1]))
+          assert release['sourceInputSha256'] == input_hash(Path.cwd()), 'Candidate source inputs changed'
+          PY
+          bash packaging/homebrew/verify-candidate.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/equivalence"
+          bash packaging/homebrew/clean-asar.sh "$RUNNER_TEMP/equivalence/rpm/usr/lib/chatgpt"
+      - name: Install and exercise cask with sandbox enabled
+        if: steps.release.outputs.ready == 'true'
+        run: |
+          # Only this disposable CI runner changes its user-namespace policy.
+          # Electron and Homebrew sandboxing remain enabled.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bash packaging/homebrew/lifecycle.sh '${{ steps.release.outputs.manifest }}'
+      - name: Upload diagnostics only
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: homebrew-diagnostics-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/homebrew-logs/*.log
+            ${{ runner.temp }}/homebrew-logs/*.json
+          if-no-files-found: ignore

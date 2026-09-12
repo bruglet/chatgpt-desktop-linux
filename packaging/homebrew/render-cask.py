@@ -51,7 +51,7 @@ end
   depends_on formula: "curl"
   depends_on formula: "node@24"
   depends_on formula: "python@3.14"
-  depends_on formula: "rpm"
+  depends_on formula: "rpm2cpio"
   depends_on formula: "rust"
   depends_on linux: :any
   container type: :naked

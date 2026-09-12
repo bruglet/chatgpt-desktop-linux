@@ -33,6 +33,9 @@ text=text.replace('#{version.csv.first}',r['version'])
 text=text.replace('  preflight_steps do\n', '  preflight_steps do\n    mkdir_p "usr/share/applications/chatgpt.desktop"\n')
 p.write_text(text)
 PY
+# Reproduce a client that already has the standalone extractor. The cask must
+# reuse this formula without trying to install the conflicting full rpm formula.
+brew install rpm2cpio
 brew install --cask "$token" 2>&1 | tee "$LOGS/install.log"
 cp "$RUNNER_TEMP/current.rb" "$TAP_DIR/Casks/chatgpt-community.rb"
 python3 "$ROOT/packaging/homebrew/check-outdated.py" "$token" "$LOGS/upstream-outdated.json"

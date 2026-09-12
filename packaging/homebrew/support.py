@@ -6,10 +6,11 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -63,17 +64,85 @@ def compare(left, right):
         raise ValueError("RPM/DEB payload mismatch: " + ", ".join(different[:30]))
 
 
+def read_exact(stream, size):
+    value = stream.read(size)
+    if len(value) != size:
+        raise ValueError("Truncated RPM header")
+    return value
+
+
+def read_rpm_header(stream):
+    intro = read_exact(stream, 16)
+    if intro[:8] != b"\x8e\xad\xe8\x01\0\0\0\0":
+        raise ValueError("Invalid RPM header")
+    index_count, data_size = struct.unpack(">II", intro[8:])
+    if index_count > 1_000_000 or data_size > 256 * 1024 * 1024:
+        raise ValueError("Invalid RPM header size")
+    index = read_exact(stream, index_count * 16)
+    data = read_exact(stream, data_size)
+    entries = {}
+    for offset in range(0, len(index), 16):
+        tag, kind, data_offset, count = struct.unpack(">IIII", index[offset:offset + 16])
+        if tag in entries or data_offset > len(data):
+            raise ValueError("Invalid RPM header index")
+        entries[tag] = (kind, data_offset, count)
+    return entries, data
+
+
+def rpm_tag(header, tag, kind):
+    entries, data = header
+    if tag not in entries or entries[tag][0] != kind:
+        raise ValueError(f"Missing RPM header tag: {tag}")
+    _, offset, count = entries[tag]
+    if kind == 4:
+        end = offset + count * 4
+        if end > len(data):
+            raise ValueError("Invalid RPM integer tag")
+        return list(struct.unpack(f">{count}I", data[offset:end]))
+    if kind not in (6, 8):
+        raise ValueError("Unsupported RPM tag type")
+    values = []
+    for _ in range(count):
+        end = data.find(b"\0", offset)
+        if end < 0:
+            raise ValueError("Invalid RPM string tag")
+        values.append(data[offset:end].decode("utf-8"))
+        offset = end + 1
+    if kind == 6 and len(values) == 1:
+        return values[0]
+    return values
+
+
+def rpm_metadata(filename):
+    with open(filename, "rb") as stream:
+        if read_exact(stream, 96)[:4] != b"\xed\xab\xee\xdb":
+            raise ValueError("Invalid RPM lead")
+        read_rpm_header(stream)
+        padding = (-stream.tell()) % 8
+        if any(read_exact(stream, padding)):
+            raise ValueError("Invalid RPM signature padding")
+        header = read_rpm_header(stream)
+    fields = [rpm_tag(header, tag, 6) for tag in (1000, 1001, 1002, 1022)]
+    directories = rpm_tag(header, 1118, 8)
+    basenames = rpm_tag(header, 1117, 8)
+    indexes = rpm_tag(header, 1116, 4)
+    if len(basenames) != len(indexes) or any(index >= len(directories) for index in indexes):
+        raise ValueError("Invalid RPM file list")
+    members = [directories[index] + basename for index, basename in zip(indexes, basenames)]
+    return fields, members
+
+
 def verify_rpm(rpm, manifest, arch):
     release = json.loads(Path(manifest).read_text())
     expected = release["packages"][arch]
     if digest(rpm) != expected["sha256"]:
         raise ValueError("RPM SHA-256 mismatch")
     rpm_arch = {"amd64": "x86_64", "arm64": "aarch64"}[arch]
-    fields = run("rpm", "-qp", "--queryformat", "%{NAME}\n%{VERSION}\n%{RELEASE}\n%{ARCH}", rpm).splitlines()
+    fields, members = rpm_metadata(rpm)
     if fields != ["chatgpt", release["version"], "1", rpm_arch]:
         raise ValueError(f"RPM identity mismatch: {fields}")
-    for entry in run("rpm", "-qpl", rpm).splitlines():
-        if ".." in Path(entry).parts:
+    for entry in members:
+        if ".." in PurePosixPath(entry).parts:
             raise ValueError(f"Unsafe RPM member: {entry}")
     return release
 

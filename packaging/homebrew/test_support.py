@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -38,17 +39,51 @@ class SupportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "link"):
             support.compare(left, right)
 
-    def test_rpm_hash_and_identity_fail_closed(self):
+    def write_rpm(self, path, arch="x86_64", basename="ChatGPT"):
+        def header(entries):
+            index = bytearray()
+            data = bytearray()
+            for tag, kind, values in entries:
+                offset = len(data)
+                if kind == 4:
+                    data.extend(struct.pack(f">{len(values)}I", *values))
+                else:
+                    for value in values:
+                        data.extend(value.encode() + b"\0")
+                index.extend(struct.pack(">IIII", tag, kind, offset, len(values)))
+            return b"\x8e\xad\xe8\x01\0\0\0\0" + struct.pack(">II", len(entries), len(data)) + index + data
+
+        lead = b"\xed\xab\xee\xdb" + b"\x04\0" + bytes(90)
+        signature = header([])
+        padding = bytes((-(len(lead) + len(signature))) % 8)
+        metadata = header([
+            (1000, 6, ["chatgpt"]), (1001, 6, ["1.2.3"]),
+            (1002, 6, ["1"]), (1022, 6, [arch]),
+            (1116, 4, [0]), (1117, 8, [basename]),
+            (1118, 8, ["/usr/lib/chatgpt/"]),
+        ])
+        path.write_bytes(lead + signature + padding + metadata + b"payload")
+
+    def test_rpm_hash_identity_and_paths_fail_closed(self):
         rpm = self.root / "app.rpm"
-        rpm.write_bytes(b"rpm")
+        self.write_rpm(rpm)
         manifest = self.root / "release.json"
         release = {"version": "1.2.3", "packages": {"amd64": {"sha256": support.digest(rpm)}}}
         manifest.write_text(json.dumps(release))
-        with patch.object(support, "run", side_effect=["chatgpt\n1.2.3\n1\nx86_64", "/usr/lib/chatgpt/ChatGPT"]):
+        support.verify_rpm(str(rpm), str(manifest), "amd64")
+
+        self.write_rpm(rpm, arch="aarch64")
+        release["packages"]["amd64"]["sha256"] = support.digest(rpm)
+        manifest.write_text(json.dumps(release))
+        with self.assertRaisesRegex(ValueError, "identity"):
             support.verify_rpm(str(rpm), str(manifest), "amd64")
-        with patch.object(support, "run", return_value="chatgpt\n1.2.3\n1\naarch64"):
-            with self.assertRaisesRegex(ValueError, "identity"):
-                support.verify_rpm(str(rpm), str(manifest), "amd64")
+
+        self.write_rpm(rpm, basename="../escape")
+        release["packages"]["amd64"]["sha256"] = support.digest(rpm)
+        manifest.write_text(json.dumps(release))
+        with self.assertRaisesRegex(ValueError, "Unsafe RPM member"):
+            support.verify_rpm(str(rpm), str(manifest), "amd64")
+
         rpm.write_bytes(b"bad")
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             support.verify_rpm(str(rpm), str(manifest), "amd64")
@@ -177,6 +212,8 @@ binary.chmod(0o755)
         self.assertIn("command_wrapper", cask)
         self.assertIn("preflight_steps", cask)
         self.assertIn("network_access: true", cask)
+        self.assertIn('depends_on formula: "rpm2cpio"', cask)
+        self.assertNotIn('depends_on formula: "rpm"', cask)
         self.assertNotIn("zap trash", cask)
 
 

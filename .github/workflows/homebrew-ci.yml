@@ -45,7 +45,7 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev gnupg rpm cpio xvfb xdotool dbus-x11 libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+          sudo apt-get install -y dpkg-dev gnupg cpio xvfb xdotool dbus-x11 libgtk-3-0t64 libnss3 libasound2t64 libgbm1
       - name: Verify additive upstream boundary
         if: github.event_name == 'pull_request'
         env:

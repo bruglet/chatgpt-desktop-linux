@@ -14,6 +14,11 @@ const PATCHED_SERVICE_TIER_GATE = new RegExp(
     `${JS_IDENT}===\`apikey\`\\)`,
 );
 const PATCHED_MODEL_MARKER = new RegExp(`${MODEL_MARKER}:${JS_IDENT}===\\\`apikey\\\``);
+const PATCHED_SERVICE_TIER_RESOLVER = new RegExp(
+  `function ${JS_IDENT}\\((${JS_IDENT}),(${JS_IDENT})\\)\\{return \\2==null\\?null:` +
+    `\\2===\\\`fast\\\`\\?${JS_IDENT}\\(\\1\\)\\?\\?${PATCH_MARKER}\\(\\1\\):` +
+    `\\1\\?\\.serviceTiers\\?\\.find\\((${JS_IDENT})=>\\3\\.id===\\2\\)\\?\\?null\\}`,
+);
 const MODEL_LIST_MAPPING_SHAPE = new RegExp(
   `function ${JS_IDENT}\\(\\{additionalAvailableModels:${JS_IDENT},authMethod:${JS_IDENT},availableModels:${JS_IDENT},` +
     `defaultModel:${JS_IDENT},enabledReasoningEfforts:${JS_IDENT},` +
@@ -99,13 +104,53 @@ function matchesApiKeyServiceTierModelContract(source) {
   return PATCHED_MODEL_MARKER.test(source) || hasApiKeyModelListMappingShape(source);
 }
 
+function currentServiceTierResolverPattern(flags = "") {
+  return new RegExp(
+    `function (${JS_IDENT})\\((${JS_IDENT}),(${JS_IDENT})\\)\\{return \\3==null\\?null:` +
+      `\\3===\\\`fast\\\`\\?(${JS_IDENT})\\(\\2\\):` +
+      `\\2\\?\\.serviceTiers\\?\\.find\\((${JS_IDENT})=>\\5\\.id===\\3\\)\\?\\?null\\}`,
+    flags,
+  );
+}
+
+function fallbackFastTierHelper() {
+  return `function ${PATCH_MARKER}(e){return e==null||e?.serviceTiers?.length||e?.${MODEL_MARKER}!==!0?null:{id:\`fast\`,name:\`Fast\`,description:\`1.5x speed, increased usage\`}}`;
+}
+
+function matchesApiKeyServiceTierResolverContract(source) {
+  return PATCHED_SERVICE_TIER_RESOLVER.test(source) || currentServiceTierResolverPattern().test(source);
+}
+
+function applyApiKeyServiceTierResolverPatch(source) {
+  if (PATCHED_SERVICE_TIER_RESOLVER.test(source)) {
+    return source;
+  }
+
+  const resolverPattern = currentServiceTierResolverPattern("g");
+  if (!resolverPattern.test(source)) {
+    return source;
+  }
+  resolverPattern.lastIndex = 0;
+
+  const patchedResolver = source.replace(
+    resolverPattern,
+    (match, _resolverVar, modelVar, tierVar, findFastVar) => match.replace(
+      `${tierVar}===\`fast\`?${findFastVar}(${modelVar})`,
+      `${tierVar}===\`fast\`?${findFastVar}(${modelVar})??${PATCH_MARKER}(${modelVar})`,
+    ),
+  );
+  const patched = source.includes(`function ${PATCH_MARKER}(`)
+    ? patchedResolver
+    : fallbackFastTierHelper() + patchedResolver;
+
+  return PATCHED_SERVICE_TIER_RESOLVER.test(patched) ? patched : source;
+}
+
 function currentFallbackOptionsPattern(flags = "") {
   return new RegExp(
-    `\\.\\.\\.\\((${JS_IDENT})\\?\\.serviceTiers\\?\\?\\[\\]\\)\\.map\\((${JS_IDENT})=>\\{` +
-      `let (${JS_IDENT})=${JS_IDENT}\\(\\2\\.id,\\2\\.name\\),` +
-      `(${JS_IDENT})=\\3===\\\`fast\\\`\\?${JS_IDENT}\\(\\1\\?\\.model\\):null;` +
-      `return\\{description:${JS_IDENT}\\(\\2,\\4\\),iconKind:\\3,label:${JS_IDENT}\\(\\2\\),` +
-      `speedMultiplier:\\4,tier:\\2,value:\\2\\.id\\}\\}\\)`,
+    `\\.\\.\\.\\((${JS_IDENT})\\?\\.serviceTiers\\?\\?\\[\\]\\)\\.map\\((${JS_IDENT})=>\\(\\{` +
+      `description:${JS_IDENT}\\(\\2\\),iconKind:${JS_IDENT}\\(\\2\\.id,\\2\\.name\\),` +
+      `label:${JS_IDENT}\\(\\2\\),tier:\\2,value:\\2\\.id\\}\\)\\)`,
     flags,
   );
 }
@@ -115,17 +160,12 @@ function matchesFallbackFastTierContract(source) {
     return true;
   }
 
-  const fastResolverShape = new RegExp(
-    `function ${JS_IDENT}\\(e\\)\\{return e\\?\\.serviceTiers\\?\\.find\\(e=>` +
-      `${JS_IDENT}\\(e\\.id,e\\.name\\)===\\\`fast\\\`\\|\\|e\\.name\\.trim\\(\\)\\.toLowerCase\\(\\)===\\\`priority\\\`\\)\\?\\?null\\}`,
-  );
-  return fastResolverShape.test(source) && currentFallbackOptionsPattern().test(source);
+  return currentFallbackOptionsPattern().test(source);
 }
 
 function hasCompleteFallbackFastTierPatch(source) {
   return (
     source.includes(`function ${PATCH_MARKER}(`) &&
-    source.includes(`??${PATCH_MARKER}(`) &&
     source.includes(`[${PATCH_MARKER}(`) &&
     source.includes(".filter(Boolean)).map")
   );
@@ -137,31 +177,18 @@ function applyFallbackFastTierPatch(source) {
   }
 
   let patched = source;
-
-  if (!patched.includes(`function ${PATCH_MARKER}(`)) {
-    const fastResolverPattern = new RegExp(
-      `function (${JS_IDENT})\\(e\\)\\{return e\\?\\.serviceTiers\\?\\.find\\(e=>` +
-        `(${JS_IDENT})\\(e\\.id,e\\.name\\)===\\\`fast\\\`\\|\\|e\\.name\\.trim\\(\\)\\.toLowerCase\\(\\)===\\\`priority\\\`\\)\\?\\?null\\}`,
-    );
-    const fastResolverMatch = patched.match(fastResolverPattern);
-    if (fastResolverMatch != null) {
-      const helper =
-        `function ${PATCH_MARKER}(e){return e==null||e?.serviceTiers?.length||e?.${MODEL_MARKER}!==!0?null:{id:\`fast\`,name:\`Fast\`,description:\`1.5x speed, increased usage\`}}`;
-      patched = patched.replace(fastResolverPattern, `${helper}${fastResolverMatch[0]}`);
+  const optionsPatch = currentFallbackOptionsPattern("g");
+  if (!optionsPatch.test(patched)) {
+    if (source.includes("serviceTiers")) {
+      warn("Could not find service tier option helpers", "API key fallback fast tier patch");
     }
+    return source;
+  }
+  optionsPatch.lastIndex = 0;
+  if (!source.includes(`function ${PATCH_MARKER}(`)) {
+    patched = fallbackFastTierHelper() + patched;
   }
 
-  const fastResolverPatch = new RegExp(
-    `function (${JS_IDENT})\\(e\\)\\{return e\\?\\.serviceTiers\\?\\.find\\(e=>` +
-      `(${JS_IDENT})\\(e\\.id,e\\.name\\)===\\\`fast\\\`\\|\\|e\\.name\\.trim\\(\\)\\.toLowerCase\\(\\)===\\\`priority\\\`\\)\\?\\?null\\}`,
-    "g",
-  );
-  patched = patched.replace(
-    fastResolverPatch,
-    `function $1(e){return e?.serviceTiers?.find(e=>$2(e.id,e.name)===\`fast\`||e.name.trim().toLowerCase()===\`priority\`)??${PATCH_MARKER}(e)}`,
-  );
-
-  const optionsPatch = currentFallbackOptionsPattern("g");
   patched = patched.replace(
     optionsPatch,
     (match, modelVar) => match.replace(
@@ -179,14 +206,18 @@ function applyFallbackFastTierPatch(source) {
     return source;
   }
 
-  if (source.includes("serviceTiers") && source.includes("defaultServiceTier")) {
+  if (source.includes("serviceTiers")) {
     warn("Could not find service tier option helpers", "API key fallback fast tier patch");
   }
   return source;
 }
 
 function applyApiKeyServiceTierPatch(source) {
-  return applyFallbackFastTierPatch(applyApiKeyModelMarkerPatch(applyApiKeyServiceTierGatePatch(source)));
+  return applyFallbackFastTierPatch(
+    applyApiKeyServiceTierResolverPatch(
+      applyApiKeyModelMarkerPatch(applyApiKeyServiceTierGatePatch(source)),
+    ),
+  );
 }
 
 function applyCurrentGatePatch(source) {
@@ -211,10 +242,21 @@ function applyCurrentModelPatch(source) {
   return modelCandidate;
 }
 
+function applyCurrentResolverPatch(source) {
+  const resolverAlreadyPatched = PATCHED_SERVICE_TIER_RESOLVER.test(source);
+  const resolverCandidate = resolverAlreadyPatched ? source : applyApiKeyServiceTierResolverPatch(source);
+  const resolverReady = resolverAlreadyPatched || resolverCandidate !== source;
+
+  if (!resolverReady) {
+    warn("Could not identify current service tier resolver", "API key service tier resolver patch");
+  }
+  return resolverCandidate;
+}
+
 function applyCurrentFallbackFastTierPatch(source) {
   if (
     !source.includes(PATCH_MARKER) &&
-    !(source.includes("serviceTiers") && source.includes("defaultServiceTier"))
+    !source.includes("serviceTiers")
   ) {
     warn("Could not identify current service tier option helpers", "API key fallback fast tier patch");
   }
@@ -245,6 +287,17 @@ const descriptors = [
     apply: applyCurrentModelPatch,
   },
   {
+    id: "api-key-service-tier-resolver",
+    phase: "webview-asset",
+    order: 20608,
+    ciPolicy: "optional",
+    pattern: /^src-[^.]+\.js$/,
+    assetMatch: matchesApiKeyServiceTierResolverContract,
+    missingDescription: "current API key service tier resolver bundle",
+    skipDescription: "API key service tier resolver patch",
+    apply: applyCurrentResolverPatch,
+  },
+  {
     id: "api-key-service-tier-fallback",
     phase: "webview-asset",
     order: 20610,
@@ -260,15 +313,18 @@ const descriptors = [
 module.exports = {
   applyApiKeyModelMarkerPatch,
   applyApiKeyServiceTierGatePatch,
+  applyApiKeyServiceTierResolverPatch,
   applyFallbackFastTierPatch,
   applyApiKeyServiceTierPatch,
   applyCurrentGatePatch,
   applyCurrentModelPatch,
+  applyCurrentResolverPatch,
   applyCurrentFallbackFastTierPatch,
   hasApiKeyServiceTierGateShape,
   hasApiKeyModelListMappingShape,
   matchesApiKeyServiceTierGateContract,
   matchesApiKeyServiceTierModelContract,
+  matchesApiKeyServiceTierResolverContract,
   matchesFallbackFastTierContract,
   descriptors,
 };

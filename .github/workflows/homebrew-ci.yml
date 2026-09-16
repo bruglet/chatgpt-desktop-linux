@@ -2,10 +2,6 @@ name: Homebrew CI
 
 on:
   pull_request:
-    paths:
-      - Casks/**
-      - packaging/homebrew/**
-      - .github/workflows/homebrew-*.yml
   workflow_dispatch:
   workflow_call:
     inputs:

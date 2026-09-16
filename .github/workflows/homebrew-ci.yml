@@ -34,20 +34,35 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Detect Homebrew changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] ||
+             ! git diff --quiet "$BASE_SHA" HEAD -- Casks packaging/homebrew '.github/workflows/homebrew-*.yml'; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: Homebrew/actions/setup-homebrew@3cdb78d0f62ad29dd32de765782654f4eedea607
+        if: steps.changes.outputs.run == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: steps.changes.outputs.run == 'true'
         with:
           node-version: 24
       - name: Install test dependencies
+        if: steps.changes.outputs.run == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev gnupg cpio xvfb xdotool dbus-x11 libgtk-3-0t64 libnss3 libasound2t64 libgbm1
       - name: Verify additive upstream boundary
-        if: github.event_name == 'pull_request'
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 packaging/homebrew/test_boundary.py "$BASE_SHA"
       - name: Unit and upstream regression tests
+        if: steps.changes.outputs.run == 'true'
         run: |
           python3 -m unittest discover -s packaging/homebrew -p 'test_*.py'
           bash -n packaging/homebrew/*.sh
@@ -56,12 +71,13 @@ jobs:
           cmp Casks/chatgpt-community.rb "$RUNNER_TEMP/expected.rb"
           brew style Casks/chatgpt-community.rb
       - name: Download candidate
-        if: inputs.candidate
+        if: steps.changes.outputs.run == 'true' && inputs.candidate
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: homebrew-candidate
           path: candidate
       - name: Select release manifest
+        if: steps.changes.outputs.run == 'true'
         id: release
         run: |
           manifest=packaging/homebrew/release.json
@@ -69,7 +85,7 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
           echo "ready=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["ready"]).lower())' "$manifest")" >> "$GITHUB_OUTPUT"
       - name: Verify signed DEB and RPM equivalence
-        if: steps.release.outputs.ready == 'true'
+        if: steps.changes.outputs.run == 'true' && steps.release.outputs.ready == 'true'
         run: |
           python3 - '${{ steps.release.outputs.manifest }}' <<'PY'
           import json,sys
@@ -82,7 +98,7 @@ jobs:
           bash packaging/homebrew/verify-candidate.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/equivalence"
           bash packaging/homebrew/clean-asar.sh "$RUNNER_TEMP/equivalence/rpm/usr/lib/chatgpt"
       - name: Install and exercise cask with sandbox enabled
-        if: steps.release.outputs.ready == 'true'
+        if: steps.changes.outputs.run == 'true' && steps.release.outputs.ready == 'true'
         run: |
           # Only this disposable CI runner changes its user-namespace policy.
           # Electron and Homebrew sandboxing remain enabled.

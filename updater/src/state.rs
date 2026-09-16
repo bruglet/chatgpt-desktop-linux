@@ -3,7 +3,41 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{fs, os::unix::fs::PermissionsExt, path::{Path, PathBuf}};
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
+
+const LEGACY_INSTALL_RECOVERY_MESSAGE: &str = "Interrupted package operation lacks a reboot-safe process identity; it was not auto-reconciled. Confirm no package manager is running, then explicitly retry the interrupted update or rollback";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProcessIdentity {
+    pub pid: u32,
+    pub start_time_ticks: u64,
+    /// The kernel boot identity prevents a PID/start-time pair from being
+    /// mistaken for the same process after a reboot.
+    #[serde(default)]
+    pub boot_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallOperation {
+    Update,
+    Rollback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstallTransaction {
+    pub package_path: PathBuf,
+    #[serde(default)]
+    pub package_sha256: Option<String>,
+    pub package_command: Option<ProcessIdentity>,
+    pub started_at: DateTime<Utc>,
+    pub operation: InstallOperation,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +64,9 @@ pub struct ArtifactPaths {
     pub workspace_dir: Option<PathBuf>,
     #[serde(alias = "deb_path")]
     pub package_path: Option<PathBuf>,
+    /// SHA-256 of the signed upstream candidate used to build `package_path`.
+    /// An absent value is intentionally treated as an unbound legacy artifact.
+    pub package_candidate_sha256: Option<String>,
     pub rollback_package_path: Option<PathBuf>,
 }
 
@@ -45,6 +82,11 @@ pub struct PersistedState {
     pub candidate_repository_path: Option<String>,
     pub upstream_package_sha256: Option<String>,
     pub status: UpdateStatus,
+    /// An interrupted transaction was not safe to reconcile automatically.
+    /// Only an explicit install-ready or rollback command may clear this
+    /// barrier after the user confirms that no package manager is running.
+    pub manual_recovery_required: bool,
+    pub install_transaction: Option<InstallTransaction>,
     pub last_check_at: Option<DateTime<Utc>>,
     pub last_successful_check_at: Option<DateTime<Utc>>,
     pub artifact_paths: ArtifactPaths,
@@ -69,7 +111,7 @@ impl Default for PersistedState {
 impl PersistedState {
     pub fn new(auto_install_on_app_exit: bool) -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 4,
             installed_version: "unknown".into(),
             installed_upstream_version: None,
             installed_upstream_sha256: None,
@@ -78,6 +120,8 @@ impl PersistedState {
             candidate_repository_path: None,
             upstream_package_sha256: None,
             status: UpdateStatus::Idle,
+            manual_recovery_required: false,
+            install_transaction: None,
             last_check_at: None,
             last_successful_check_at: None,
             artifact_paths: ArtifactPaths::default(),
@@ -106,7 +150,12 @@ impl PersistedState {
         // A schema-v1 candidate cannot be resumed safely. Preserve only the
         // installed/rollback facts and drop the pending candidate atomically on
         // the next save.
-        if raw.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(1) < 2 {
+        if raw
+            .get("schema_version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1)
+            < 2
+        {
             let mut migrated = Self::new(auto_install);
             migrated.installed_version = raw
                 .get("installed_version")
@@ -125,8 +174,30 @@ impl PersistedState {
         }
 
         let mut state: Self = serde_json::from_value(raw)?;
-        state.schema_version = 2;
+        let needs_manual_install_recovery = state.status == UpdateStatus::Installing
+            && state
+                .install_transaction
+                .as_ref()
+                .is_some_and(|transaction| {
+                    transaction
+                        .package_command
+                        .as_ref()
+                        .is_some_and(|owner| owner.boot_id.is_none())
+                });
+        state.schema_version = 4;
         state.auto_install_on_app_exit = auto_install;
+        if needs_manual_install_recovery {
+            // Schema 2 persisted only PID/start-time. That pair cannot prove
+            // ownership after a reboot, so never auto-reconcile it. Preserve
+            // the candidate and rollback facts while requiring an explicit
+            // user-confirmed retry instead of leaving the updater blocked in
+            // Installing forever.
+            state.mark_manual_recovery_required(LEGACY_INSTALL_RECOVERY_MESSAGE);
+            // Persist the migration while the old transaction shape is still
+            // in hand. Automatic callers must not repeatedly rediscover a
+            // schema-2 owner that can never be classified safely.
+            state.save_updater(path)?;
+        }
         Ok(state)
     }
 
@@ -134,18 +205,39 @@ impl PersistedState {
         let parent = path.parent().context("state path has no parent")?;
         fs::create_dir_all(parent)?;
         let temp = parent.join(format!(".state-{}.tmp", std::process::id()));
-        fs::write(&temp, format!("{}\n", serde_json::to_string_pretty(self)?))?;
+        let contents = format!("{}\n", serde_json::to_string_pretty(self)?);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp)?;
+        file.write_all(contents.as_bytes())?;
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
+        // The transaction owner must be durable before the caller releases a
+        // gated package command. A rename alone only updates the namespace;
+        // it does not order the file contents against a power loss.
+        file.sync_all()?;
+        drop(file);
         fs::rename(&temp, path)?;
+        // The directory entry for the atomic rename is also part of the
+        // recovery journal and must be durable before mutation is released.
+        fs::File::open(parent)?.sync_all()?;
         Ok(())
     }
 
     pub fn mark_failed(&mut self, message: impl Into<String>) {
         self.status = UpdateStatus::Failed;
+        self.manual_recovery_required = false;
+        self.install_transaction = None;
         self.error_message = Some(message.into());
         self.waiting_for_app_exit_auto_install = false;
         self.install_auth_blocked_package_sha256 = None;
         self.install_after_app_exit_requested = false;
+    }
+
+    pub fn mark_manual_recovery_required(&mut self, message: impl Into<String>) {
+        self.mark_failed(message);
+        self.manual_recovery_required = true;
     }
 
     pub fn install_auth_retry_is_blocked(&self) -> bool {
@@ -160,7 +252,6 @@ impl PersistedState {
     pub fn clear_install_auth_retry_block(&mut self) {
         self.install_auth_blocked_package_sha256 = None;
     }
-
 }
 
 #[cfg(test)]
@@ -171,18 +262,24 @@ mod tests {
     fn legacy_v1_candidate_is_reset_but_rollback_is_preserved() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let state_path = dir.path().join("state.json");
-        fs::write(&state_path, r#"{
+        fs::write(
+            &state_path,
+            r#"{
           "installed_version":"1.2.3",
           "candidate_version":"legacy",
           "status":"ready_to_install",
           "artifact_paths":{"legacy_source_path":"/tmp/legacy-upstream","rollback_package_path":"/tmp/good.deb"},
           "last_known_good_version":"1.2.2"
-        }"#)?;
+        }"#,
+        )?;
         let state = PersistedState::load_or_default(&state_path, true)?;
-        assert_eq!(state.schema_version, 2);
+        assert_eq!(state.schema_version, 4);
         assert_eq!(state.candidate_version, None);
         assert_eq!(state.installed_version, "1.2.3");
-        assert_eq!(state.artifact_paths.rollback_package_path, Some(PathBuf::from("/tmp/good.deb")));
+        assert_eq!(
+            state.artifact_paths.rollback_package_path,
+            Some(PathBuf::from("/tmp/good.deb"))
+        );
         Ok(())
     }
 
@@ -214,6 +311,73 @@ mod tests {
         state.save_updater(&state_path)?;
         let loaded = PersistedState::load_or_default(&state_path, true)?;
         assert!(loaded.install_auth_retry_is_blocked());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_active_install_is_migrated_to_manual_recovery() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let state_path = dir.path().join("state.json");
+        fs::write(
+            &state_path,
+            r#"{
+          "schema_version":2,
+          "installed_version":"2026.09.05-1",
+          "candidate_version":"2026.09.06",
+          "upstream_package_sha256":"candidate-sha",
+          "status":"installing",
+          "artifact_paths":{
+            "package_path":"/tmp/candidate.deb",
+            "rollback_package_path":"/tmp/known-good.deb"
+          },
+          "install_transaction":{
+            "package_path":"/tmp/candidate.deb",
+            "package_sha256":"package-sha",
+            "package_command":{"pid":4242,"start_time_ticks":1234},
+            "started_at":"2026-01-01T00:00:00Z",
+            "operation":"update"
+          }
+        }"#,
+        )?;
+
+        let state = PersistedState::load_or_default(&state_path, true)?;
+        assert_eq!(state.schema_version, 4);
+        assert_eq!(state.status, UpdateStatus::Failed);
+        assert!(state.manual_recovery_required);
+        assert!(state.install_transaction.is_none());
+        assert_eq!(state.candidate_version.as_deref(), Some("2026.09.06"));
+        assert_eq!(
+            state.artifact_paths.rollback_package_path,
+            Some(PathBuf::from("/tmp/known-good.deb"))
+        );
+        assert!(state
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("reboot-safe process identity")));
+
+        let on_disk: serde_json::Value = serde_json::from_str(&fs::read_to_string(&state_path)?)?;
+        assert_eq!(
+            on_disk
+                .get("schema_version")
+                .and_then(|value| value.as_u64()),
+            Some(4)
+        );
+        assert_eq!(
+            on_disk
+                .get("manual_recovery_required")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        state.save_updater(&state_path)?;
+        let persisted = PersistedState::load_or_default(&state_path, true)?;
+        assert_eq!(persisted.status, UpdateStatus::Failed);
+        assert!(persisted.manual_recovery_required);
+        assert!(persisted.install_transaction.is_none());
+        assert_eq!(
+            persisted.artifact_paths.rollback_package_path,
+            Some(PathBuf::from("/tmp/known-good.deb"))
+        );
         Ok(())
     }
 

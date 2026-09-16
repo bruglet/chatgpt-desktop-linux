@@ -47,8 +47,16 @@ is cancelled before package mutation, the candidate instead remains ready; the
 updater suppresses repeat prompts until an explicit retry or another app-exit
 cycle.
 
-Legacy schema state is treated as an incompatible pending candidate and reset;
-the installed package and recorded rollback artifact are preserved.
+Legacy schema-v1 candidate state is treated as an incompatible pending candidate
+and reset; the installed package and recorded rollback artifact are preserved.
+An active package transaction from schema 2, or any persisted transaction whose
+owner lacks a reboot-safe identity, is marked failed without auto-reconciliation
+and sets a manual-recovery barrier. Automatic checks remain paused until the
+user confirms that no package manager is still running and explicitly retries
+the interrupted operation with `install-ready` or `rollback`; the candidate and
+rollback facts remain available. If owner classification stays unavailable
+through the recovery grace period, the same manual state is entered rather than
+assuming that the package manager exited.
 
 ## Commands
 

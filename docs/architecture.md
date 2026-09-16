@@ -114,8 +114,11 @@ user-authored plugins.
 The Rust updater polls signed metadata, downloads into a
 version/architecture/SHA cache, runs the minimal packaged update-builder, and
 builds a sibling candidate. Atomic promotion happens only after the app exits.
-The previous managed artifact is retained for rollback. Old incompatible state
-is reset without deleting installed or rollback packages.
+The previous managed artifact is retained for rollback. Legacy schema-v1
+candidate state is reset without deleting installed or rollback packages. A
+schema-2 interrupted package transaction whose owner identity cannot survive a
+reboot is instead retained as failed evidence behind a manual-recovery barrier;
+it is never auto-reconciled as a live install.
 
 ## Generated state
 

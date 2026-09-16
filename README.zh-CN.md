@@ -201,6 +201,7 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `api-key-model-visibility` | 显示 API-key compatible provider 返回的模型 | [文档](linux-features/api-key-model-visibility/README.md) |
 | `api-key-service-tier` | API-key compatible provider 的 Fast/service-tier UI | [文档](linux-features/api-key-service-tier/README.md) |
 | `appshots` | 从 composer 捕获并裁剪当前 Linux 窗口 | [文档](linux-features/appshots/README.md) |
+| `authored-message-visibility` | 工具活动折叠后，仍显示助手和用户消息 | [文档](linux-features/authored-message-visibility/README.md) |
 | `authenticated-proxy` | 带用户名和密码的 HTTP proxy | [文档](linux-features/authenticated-proxy/README.md) |
 | `automation-extensions` | 多时间调度和 eager `automation_update` | [文档](linux-features/automation-extensions/README.md) |
 | `browser-proxy` | 让 Browser Use 的网络辅助进程继承显式代理设置 | [文档](linux-features/browser-proxy/README.zh-CN.md) |
@@ -220,6 +221,7 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `omarchy-theme` | 加载当前 Omarchy 主题生成的 CSS | [文档](linux-features/omarchy-theme/README.md) |
 | `persistent-status-panel` | 在线程切换和重启后保留 `/status` panel | [文档](linux-features/persistent-status-panel/README.md) |
 | `pet-overlay` | Linux avatar overlay 定位和 compositor hints | [文档](linux-features/pet-overlay/README.md) |
+| `preferred-editor-file-links` | 单击源代码链接时使用所选编辑器打开 | [文档](linux-features/preferred-editor-file-links/README.md) |
 | `project-group-last-updated-sort` | 对 project group 和 task 应用 Last updated 排序 | [文档](linux-features/project-group-last-updated-sort/README.md) |
 | `project-task-sort` | 恢复 alternate Projects 的 Created 排序 | [文档](linux-features/project-task-sort/README.md) |
 | `read-aloud` | 为 assistant response 添加 Linux 朗读控件 | [文档](linux-features/read-aloud/README.md) |

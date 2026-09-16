@@ -69,7 +69,7 @@ jobs:
         with:
           ref: main
           token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: homebrew-candidate
           path: candidate

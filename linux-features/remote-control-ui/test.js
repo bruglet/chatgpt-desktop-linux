@@ -182,11 +182,11 @@ test("remote-control UI descriptors match the current app chunks", () => {
   );
 
   assert.ok(
-    remoteControlConnectionsPatch.pattern.test("app-initial-BTphDPeq.js"),
+    remoteControlConnectionsPatch.pattern.test("app-primary-40386834d0f6.js"),
   );
   assert.equal(
     remoteControlConnectionsPatch.pattern.test(
-      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~lzri21pz-DYeTwZrs.js",
+      "app-initial-BTphDPeq.js",
     ),
     false,
   );
@@ -196,6 +196,48 @@ test("remote-control UI descriptors match the current app chunks", () => {
     experimentalFeaturesPatch.pattern.test("experimental-features-queries-old.js"),
     false,
   );
+});
+
+test("remote-control visibility edits only its unique destructured owner", () => {
+  const patch = featurePatches.find((candidate) => candidate.id === "remote-control-connections-visibility");
+  const unrelated = "function other(){return x&&(y?.available??!0)&&y?.accessRequired!==!0}";
+  const owner =
+    "function a({remoteControlConnectionsState:e,slingshotEnabled:t}){return t&&(e?.available??!0)&&e?.accessRequired!==!0}";
+  const source = unrelated + owner;
+  const patched = patch.apply(source, {});
+
+  assert.equal(patched.slice(0, unrelated.length), unrelated);
+  assert.match(patched.slice(unrelated.length), /\(t\|\|navigator\.userAgent\.includes\(`Linux`\)\)/u);
+});
+
+test("remote-control visibility rejects duplicate and partial owners byte-identically", () => {
+  const patch = featurePatches.find((candidate) => candidate.id === "remote-control-connections-visibility");
+  const current =
+    "function a({remoteControlConnectionsState:e,slingshotEnabled:t}){return t&&(e?.available??!0)&&e?.accessRequired!==!0}";
+  const patched = patch.apply(current, {});
+  const partial = current.replace("e?.accessRequired!==!0", "e?.accessRequired===!1");
+
+  for (const source of [current + current, current + patched, partial]) {
+    const result = captureWarns(() => patch.apply(source, {}));
+    assert.equal(result.value, source);
+    assert.match(result.warnings.join("\n"), /Could not find remote control connections visibility gate/);
+    assert.equal(patch.assetMatch(source), false);
+  }
+});
+
+test("remote-control visibility validates the earlier remote-mobile owner before marking it", () => {
+  const patch = featurePatches.find((candidate) => candidate.id === "remote-control-connections-visibility");
+  const mobile =
+    "function a({remoteControlConnectionsState:e,slingshotEnabled:t}){let n=typeof navigator!=`undefined`&&navigator.userAgent.includes(`Linux`);/*codexLinuxRemoteControlVisibilityEnabled*/return(n||t)&&(n||(e?.available??!0))&&e?.accessRequired!==!0}";
+  const patched = patch.apply(mobile, {});
+
+  assert.match(patched, /codexLinuxRemoteControlVisibilityEnabled\*\/\/\*codexLinuxRemoteControlUiVisibilityEnabled/u);
+  assert.equal(patch.apply(patched, {}), patched);
+
+  const ambiguous = mobile + mobile;
+  const result = captureWarns(() => patch.apply(ambiguous, {}));
+  assert.equal(result.value, ambiguous);
+  assert.equal(patch.assetMatch(ambiguous), false);
 });
 
 test("remote-control UI feature patches matching webview assets and records patch report entries", () => {
@@ -213,7 +255,12 @@ test("remote-control UI feature patches matching webview assets and records patc
         const appInitialAsset = "app-initial-BTphDPeq.js";
         fs.writeFileSync(
           path.join(assetsDir, appInitialAsset),
-          "function Twt(){let e=(0,kwt.c)(3),{data:t}=Vr(y4,Br(B2)),n=BN(`4114442250`);if(t?.config[`features.remote_connections`]===!0)return!0;let r=t?.config.features;if(typeof r!=`object`||!r||Array.isArray(r))return n;let i;return e[0]!==r||e[1]!==n?(i=Object.getOwnPropertyDescriptor(r,`remote_connections`)?.value===!0||n,e[0]=r,e[1]=n,e[2]=i):i=e[2],i}function D8(e){return e(RN,`4114442250`)?`enabled`:`disabled`}function a({remoteControlConnectionsState:e,slingshotEnabled:t}){return t&&(e?.available??!0)&&e?.accessRequired!==!0}",
+          "function Twt(){let e=(0,kwt.c)(3),{data:t}=Vr(y4,Br(B2)),n=BN(`4114442250`);if(t?.config[`features.remote_connections`]===!0)return!0;let r=t?.config.features;if(typeof r!=`object`||!r||Array.isArray(r))return n;let i;return e[0]!==r||e[1]!==n?(i=Object.getOwnPropertyDescriptor(r,`remote_connections`)?.value===!0||n,e[0]=r,e[1]=n,e[2]=i):i=e[2],i}function D8(e){return e(RN,`4114442250`)?`enabled`:`disabled`}",
+        );
+        const appPrimaryAsset = "app-primary-40386834d0f6.js";
+        fs.writeFileSync(
+          path.join(assetsDir, appPrimaryAsset),
+          "function a({remoteControlConnectionsState:e,slingshotEnabled:t}){return t&&(e?.available??!0)&&e?.accessRequired!==!0}",
         );
         fs.writeFileSync(
           path.join(assetsDir, "settings-route-state-BwIfDYxh.js"),
@@ -229,7 +276,7 @@ test("remote-control UI feature patches matching webview assets and records patc
 
         assert.match(
           fs.readFileSync(
-            path.join(assetsDir, appInitialAsset),
+            path.join(assetsDir, appPrimaryAsset),
             "utf8",
           ),
           /navigator\.userAgent\.includes\(`Linux`\)/,

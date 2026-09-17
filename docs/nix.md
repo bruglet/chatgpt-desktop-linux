@@ -120,14 +120,25 @@ On NixOS the launcher includes a package-local Bubblewrap adapter on `PATH` for
 the Codex Linux command sandbox. The adapter preserves the sandbox policy and
 adds the packaged `nix-ld` interpreter and runtime libraries inside that mount
 namespace. Generic Linux Git, Node.js, Python, and pnpm runtimes downloaded into
-the user cache therefore work in sandboxed workspace commands without enabling
-the system-wide `programs.nix-ld` module. Other Nix systems keep the normal
+the user cache, and the primary runtime's bundled headless LibreOffice, therefore
+work in sandboxed workspace commands without enabling the system-wide
+`programs.nix-ld` module. Other Nix systems keep the normal
 launcher path and use their system Bubblewrap integration.
 
 The adapter uses the generic loader symlink that NixOS provides through
 `environment.stub-ld` by default. A system that explicitly disables both that
 stub and `programs.nix-ld` keeps the packaged Bubblewrap integration, but its
 generic cached runtimes remain unavailable.
+
+With `programs.nix-ld` enabled, the login shell exports `NIX_LD` and
+`NIX_LD_LIBRARY_PATH`. Codex snapshots that shell and sources the snapshot
+before every sandboxed command, which restores the host values over the ones
+the adapter set. Cached generic runtimes then resolve libraries through the
+system nix-ld path. The NixOS module therefore adds the package's workspace
+runtime libraries to `programs.nix-ld.libraries` whenever nix-ld is enabled.
+Home Manager cannot set that system option; add
+`programs.codexDesktopLinux`'s package `passthru.workspaceRuntimeLibraries`
+to `programs.nix-ld.libraries` in the NixOS configuration instead.
 
 The wrapper uses the NixOS OpenGL driver path when it is present and retains
 Mesa as a fallback. Proprietary drivers on non-NixOS distributions may still

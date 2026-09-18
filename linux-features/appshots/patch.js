@@ -43,6 +43,81 @@ function matchesLinuxAppshotAvailabilityContract(source) {
     PATCHED_APPSHOT_AVAILABILITY.test(source);
 }
 
+function linuxAppshotWaylandHelperSource() {
+  return "function codexLinuxAppshotIsWayland(){return process.platform===`linux`&&((process.env.XDG_SESSION_TYPE||``).toLowerCase()===`wayland`||!!process.env.WAYLAND_DISPLAY)}";
+}
+
+function appshotHotkeyPatterns() {
+  return [
+    {
+      current: /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=process\.platform\)\{return \3===`darwin`&&([A-Za-z_$][\w$]*)\(\2\)!=null\}/g,
+      patched: /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=process\.platform\)\{return \(\3===`darwin`\|\|\3===`linux`&&!codexLinuxAppshotIsWayland\(\)\)&&([A-Za-z_$][\w$]*)\(\2\)!=null\}/g,
+      replace: (_match, fn, hotkey, platform, normalize) =>
+        `function ${fn}(${hotkey},${platform}=process.platform){return (${platform}===\`darwin\`||${platform}===\`linux\`&&!codexLinuxAppshotIsWayland())&&${normalize}(${hotkey})!=null}`,
+    },
+    {
+      current: /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=`press`\)\{if\(process\.platform!==`darwin`\)return null;/g,
+      patched: /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=`press`\)\{if\(process\.platform!==`darwin`&&process\.platform!==`linux`\)return null;/g,
+      replace: (_match, fn, hotkey, handlers, trigger) =>
+        `function ${fn}(${hotkey},${handlers},${trigger}=\`press\`){if(process.platform!==\`darwin\`&&process.platform!==\`linux\`)return null;`,
+    },
+    {
+      current: /new Set\(\[\.\.\.([A-Za-z_$][\w$]*),`shift`\]\)/g,
+      patched: /new Set\(\[\.\.\.([A-Za-z_$][\w$]*),`shift`,`super`,`meta`,`win`\]\)/g,
+      replace: (_match, base) => `new Set([...${base},\`shift\`,\`super\`,\`meta\`,\`win\`])`,
+    },
+    {
+      current: /this\.configuredHotkey=([A-Za-z_$][\w$]*)===void 0\?process\.platform===`win32`\?([A-Za-z_$][\w$]*):([A-Za-z_$][\w$]*):\1/g,
+      patched: /this\.configuredHotkey=([A-Za-z_$][\w$]*)===void 0\?process\.platform===`win32`\?([A-Za-z_$][\w$]*):process\.platform===`linux`\?null:([A-Za-z_$][\w$]*):\1/g,
+      replace: (_match, stored, windowsDefault, macDefault) =>
+        `this.configuredHotkey=${stored}===void 0?process.platform===\`win32\`?${windowsDefault}:process.platform===\`linux\`?null:${macDefault}:${stored}`,
+    },
+    {
+      current: /supported:this\.enabled&&\(process\.platform===`darwin`\|\|process\.platform===`win32`&&this\.windowsCaptureNativeBridge!=null&&!this\.windowsCaptureNativeBridgeFailed\),configuredHotkey:this\.configuredHotkey,isActive:this\.registration!=null/g,
+      patched: /supported:this\.enabled&&\(process\.platform===`linux`\|\|process\.platform===`darwin`\|\|process\.platform===`win32`&&this\.windowsCaptureNativeBridge!=null&&!this\.windowsCaptureNativeBridgeFailed\),configuredHotkey:this\.configuredHotkey,isActive:this\.registration!=null,linuxWayland:codexLinuxAppshotIsWayland\(\)/g,
+      replace: "supported:this.enabled&&(process.platform===`linux`||process.platform===`darwin`||process.platform===`win32`&&this.windowsCaptureNativeBridge!=null&&!this.windowsCaptureNativeBridgeFailed),configuredHotkey:this.configuredHotkey,isActive:this.registration!=null,linuxWayland:codexLinuxAppshotIsWayland()",
+    },
+  ];
+}
+
+function appshotHotkeyState(source) {
+  const patterns = appshotHotkeyPatterns();
+  const currentCounts = patterns.map(({ current }) => [...source.matchAll(current)].length);
+  const patchedCounts = patterns.map(({ patched }) => [...source.matchAll(patched)].length);
+  const helper = linuxAppshotWaylandHelperSource();
+  const helperCount = source.split(helper).length - 1;
+  if (currentCounts.every((count) => count === 1) &&
+      patchedCounts.every((count) => count === 0) && helperCount === 0 &&
+      !source.includes("codexLinuxAppshotIsWayland")) {
+    return { kind: "current", patterns };
+  }
+  if (currentCounts.every((count) => count === 0) &&
+      patchedCounts.every((count) => count === 1) && helperCount === 1) {
+    return { kind: "patched", patterns };
+  }
+  return { kind: "invalid" };
+}
+
+function matchesLinuxAppshotHotkeyContract(source) {
+  const state = appshotHotkeyState(source);
+  return state.kind === "current" || state.kind === "patched";
+}
+
+function applyLinuxAppshotHotkeyPatch(source) {
+  const state = appshotHotkeyState(source);
+  if (state.kind === "patched") return source;
+  if (state.kind !== "current") {
+    if (source.includes("appshotHotkey") || source.includes("appshot-hotkey-state")) {
+      warn("Could not find one complete current AppShots hotkey owner", "Linux AppShots hotkey patch");
+    }
+    return source;
+  }
+  let patched = source;
+  for (const { current, replace } of state.patterns) patched = patched.replace(current, replace);
+  patched = linuxAppshotWaylandHelperSource() + patched;
+  return appshotHotkeyState(patched).kind === "patched" ? patched : source;
+}
+
 function applyLinuxAppshotMainProcessPatch(currentSource) {
   if (currentSource.includes(APPSHOT_HELPER_MARKER)) {
     return currentSource;
@@ -74,44 +149,6 @@ function applyLinuxAppshotMainProcessPatch(currentSource) {
   );
 
   return appendLinuxAppshotHelper(patchedSource);
-}
-
-function applyLinuxAppshotHotkeyPatch(currentSource) {
-  const marker = "codexLinuxAppshotIsWayland";
-  if (currentSource.includes(`function ${marker}`)) {
-    return currentSource;
-  }
-  const replacements = [
-    [/function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=process\.platform\)\{return \3===`darwin`&&([A-Za-z_$][\w$]*)\(\2\)!=null\}/g, (_m, f, e, p, n) => `function ${f}(${e},${p}=process.platform){return (${p}===\`darwin\`||${p}===\`linux\`&&!codexLinuxAppshotIsWayland())&&${n}(${e})!=null}`],
-    [/function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=`press`\)\{if\(process\.platform!==`darwin`\)return null;/g, (_m, f, e, h, t) => `function ${f}(${e},${h},${t}=\`press\`){if(process.platform!==\`darwin\`&&process.platform!==\`linux\`)return null;`],
-    [/new Set\(\[\.\.\.([A-Za-z_$][\w$]*),`shift`\]\)/g, (_m, base) => `new Set([...${base},\`shift\`,\`super\`,\`meta\`,\`win\`])`],
-    [/([A-Za-z_$][\w$]*)===void 0\?this\.configuredHotkey=process\.platform===`win32`\?([A-Za-z_$][\w$]*):([A-Za-z_$][\w$]*):this\.configuredHotkey=\1/g, (_m, stored, windowsDefault, macDefault) => `${stored}===void 0?this.configuredHotkey=process.platform===\`win32\`?${windowsDefault}:process.platform===\`linux\`?null:${macDefault}:this.configuredHotkey=${stored}`],
-    [/supported:this\.enabled&&\(process\.platform===`darwin`\|\|process\.platform===`win32`&&this\.windowsCaptureNativeBridge!=null&&!this\.windowsCaptureNativeBridgeFailed\),configuredHotkey:this\.configuredHotkey,isActive:this\.registration!=null/g, "supported:this.enabled&&(process.platform===`linux`||process.platform===`darwin`||process.platform===`win32`&&this.windowsCaptureNativeBridge!=null&&!this.windowsCaptureNativeBridgeFailed),configuredHotkey:this.configuredHotkey,isActive:this.registration!=null,linuxWayland:codexLinuxAppshotIsWayland()"],
-  ];
-  let patchedSource = currentSource;
-  const counts = [];
-  for (const [pattern, replacement] of replacements) {
-    const matches = [...patchedSource.matchAll(pattern)];
-    counts.push(matches.length);
-    if (matches.length === 1) patchedSource = patchedSource.replace(pattern, replacement);
-  }
-  if (counts.every((count) => count === 1)) return withLinuxAppshotWaylandHelper(patchedSource);
-
-  if (currentSource.includes("appshotHotkey") || currentSource.includes("appshot-hotkey-state")) {
-    warn("Could not find current AppShots hotkey class", "Linux AppShots hotkey patch");
-  }
-  return currentSource;
-}
-
-function linuxAppshotWaylandHelperSource() {
-  return "function codexLinuxAppshotIsWayland(){return process.platform===`linux`&&((process.env.XDG_SESSION_TYPE||``).toLowerCase()===`wayland`||!!process.env.WAYLAND_DISPLAY)}";
-}
-
-function withLinuxAppshotWaylandHelper(source) {
-  if (source.includes("function codexLinuxAppshotIsWayland")) {
-    return source;
-  }
-  return `${linuxAppshotWaylandHelperSource()}${source}`;
 }
 
 function appendLinuxAppshotHelper(source) {
@@ -207,6 +244,12 @@ const descriptors = [
     apply: applyLinuxAppshotMainProcessPatch,
   },
   {
+    id: "linux-appshots-hotkey",
+    phase: "main-bundle",
+    order: 143,
+    apply: applyLinuxAppshotHotkeyPatch,
+  },
+  {
     id: "linux-appshots-availability",
     phase: "webview-asset",
     order: 1090,
@@ -216,12 +259,6 @@ const descriptors = [
     skipDescription: "Linux AppShots availability patch",
     apply: applyLinuxAppshotAvailabilityPatch,
   },
-  {
-    id: "linux-appshots-hotkey",
-    phase: "main-bundle",
-    order: 143,
-    apply: applyLinuxAppshotHotkeyPatch,
-  },
 ];
 
 module.exports = {
@@ -229,5 +266,6 @@ module.exports = {
   applyLinuxAppshotHotkeyPatch,
   applyLinuxAppshotMainProcessPatch,
   matchesLinuxAppshotAvailabilityContract,
+  matchesLinuxAppshotHotkeyContract,
   descriptors,
 };

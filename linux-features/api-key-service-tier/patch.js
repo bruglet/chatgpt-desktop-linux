@@ -130,13 +130,7 @@ function serviceTierResolverState(source) {
   if (current.length === 0 && patched.length === 1 && helperCount === 1) {
     return { kind: "patched", match: patched[0] };
   }
-  if (current.length > 0 && patched.length > 0) {
-    return { kind: "mixed" };
-  }
-  if (current.length > 1 || patched.length > 1 || helperCount > 1) {
-    return { kind: "ambiguous" };
-  }
-  return { kind: "partial" };
+  return { kind: "invalid" };
 }
 
 function matchesApiKeyServiceTierResolverContract(source) {
@@ -335,7 +329,7 @@ const descriptors = [
     phase: "webview-asset",
     order: 20608,
     ciPolicy: "optional",
-    pattern: /^app-initial-[^.]+\.js$/,
+    pattern: /^app-shared-[^.]+\.js$/,
     assetMatch: matchesApiKeyServiceTierResolverContract,
     missingDescription: "current API key service tier resolver bundle",
     skipDescription: "API key service tier resolver patch",

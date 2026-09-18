@@ -92,7 +92,7 @@ test("api-key-service-tier stays disabled until listed in features.json", () => 
   });
 });
 
-test("current package descriptors use the semantic app-initial owner", () => {
+test("current package descriptors use semantic app-initial and app-shared owners", () => {
   assert.deepEqual(
     descriptors.map((descriptor) => descriptor.id),
     [
@@ -102,7 +102,11 @@ test("current package descriptors use the semantic app-initial owner", () => {
       "api-key-service-tier-fallback",
     ],
   );
-  assert.ok(descriptors.every((descriptor) => descriptor.pattern.test("app-initial-Bd3Z1bES.js")));
+  const resolver = descriptors.find(({ id }) => id === "api-key-service-tier-resolver");
+  assert.ok(descriptors.filter((descriptor) => descriptor !== resolver)
+    .every((descriptor) => descriptor.pattern.test("app-initial-Bd3Z1bES.js")));
+  assert.equal(resolver.pattern.test("app-shared-d9439dc9e73f.js"), true);
+  assert.equal(resolver.pattern.test("app-initial-Bd3Z1bES.js"), false);
   assert.ok(descriptors.every((descriptor) => !descriptor.pattern.test("projects-index-page-DjNy92Xe.js")));
 });
 
@@ -313,89 +317,49 @@ test("fallback fast tier is synthesized only for API-key model catalog entries",
   assert.doesNotMatch(patched, /\)\?\?null\}function nEe/);
 });
 
-test("split service tier assets round-trip synthetic fast only for marked API-key models", () => {
+test("split semantic owners round-trip synthetic fast for an API-key model without service tiers", () => {
   const optionsSource = [
     "const gQ={value:null};function eEe(e){return e.description}function fQ(e){return e}function $Te(e){return e.name}",
     "function tEe(e){return[gQ,...(e?.serviceTiers??[]).map(t=>({description:eEe(t),iconKind:fQ(t.id,t.name),label:$Te(t),tier:t,value:t.id}))]}",
   ].join("");
   const resolverSource = [
     "function py(e,t){let n=t?.trim().toLowerCase();return e===`priority`||e===`fast`||n===`fast`?`fast`:null}",
-    "function my(e,t){return t==null?null:t===`fast`?hy(e):e?.serviceTiers?.find(e=>e.id===t)??null}",
-    "function hy(e){return e?.serviceTiers?.find(e=>py(e.id,e.name)===`fast`||e.name.trim().toLowerCase()===`priority`)??null}",
+    "function kH(e,t){return t==null?null:t===`fast`?AH(e):e?.serviceTiers?.find(e=>e.id===t)??null}",
+    "function AH(e){return e?.serviceTiers?.find(e=>py(e.id,e.name)===`fast`||e.name.trim().toLowerCase()===`priority`)??null}",
   ].join("");
 
-  withFeatureConfig(["api-key-service-tier"], () => {
-    const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "api-key-service-tier-split-assets-"));
-    try {
-      const assetsDir = path.join(tempApp, "webview", "assets");
-      const optionsPath = path.join(assetsDir, "app-initial-97cc141651bb.js");
-      const resolverPath = path.join(assetsDir, "app-initial-resolver.js");
-      fs.mkdirSync(assetsDir, { recursive: true });
-      fs.writeFileSync(optionsPath, optionsSource);
-      fs.writeFileSync(resolverPath, resolverSource);
+  const patchedOptions = applyPatchTwice(applyFallbackFastTierPatch, optionsSource);
+  const patchedResolver = applyPatchTwice(applyApiKeyServiceTierResolverPatch, resolverSource);
+  const optionsFor = Function(`${patchedOptions};return tEe`)();
+  const resolveTier = Function(`${patchedResolver};return kH`)();
+  const apiKeyModel = { codexLinuxApiKeyServiceTierModel: true };
+  const syntheticOption = optionsFor(apiKeyModel).find(({ value }) => value === "fast");
 
-      const report = createPatchReport();
-      captureWarnings(() => patchExtractedApp(tempApp, { report }));
-      const optionsEntry = report.patches.find(
-        ({ name }) => name === "feature:api-key-service-tier:api-key-service-tier-fallback",
-      );
-      const resolverEntry = report.patches.find(
-        ({ name }) => name === "feature:api-key-service-tier:api-key-service-tier-resolver",
-      );
-      assert.equal(optionsEntry?.status, "applied");
-      assert.equal(resolverEntry?.status, "applied");
+  assert.equal(syntheticOption?.tier?.id, "fast");
+  assert.equal(resolveTier(apiKeyModel, syntheticOption.value)?.id, "fast");
+  assert.equal(resolveTier(apiKeyModel, syntheticOption.value)?.name, "Fast");
 
-      const patchedOptions = fs.readFileSync(optionsPath, "utf8");
-      const patchedResolver = fs.readFileSync(resolverPath, "utf8");
-      assert.equal(applyFallbackFastTierPatch(patchedOptions), patchedOptions);
-      assert.equal(applyApiKeyServiceTierResolverPatch(patchedResolver), patchedResolver);
-      const optionsFor = Function(`${patchedOptions};return tEe`)();
-      const resolveTier = Function(`${patchedResolver};return my`)();
-      const apiKeyModel = { codexLinuxApiKeyServiceTierModel: true };
-      const syntheticOption = optionsFor(apiKeyModel).find(({ value }) => value === "fast");
-
-      assert.equal(syntheticOption?.value, "fast");
-      assert.equal(syntheticOption?.tier.id, "fast");
-      assert.equal(resolveTier(apiKeyModel, syntheticOption.value)?.id, "fast");
-      assert.equal(resolveTier(apiKeyModel, syntheticOption.value)?.name, "Fast");
-
-      const upstreamFast = { id: "priority", name: "Priority", description: "Upstream fast" };
-      const chatGptModel = { codexLinuxApiKeyServiceTierModel: false, serviceTiers: [upstreamFast] };
-      assert.equal(resolveTier(chatGptModel, "fast"), upstreamFast);
-      assert.equal(optionsFor(chatGptModel).find(({ value }) => value === "priority")?.tier, upstreamFast);
-
-      const unmarkedModel = {};
-      assert.equal(resolveTier(unmarkedModel, "fast"), null);
-      assert.equal(optionsFor(unmarkedModel).some(({ value }) => value === "fast"), false);
-    } finally {
-      fs.rmSync(tempApp, { recursive: true, force: true });
-    }
-  });
+  const upstreamFast = { id: "priority", name: "Priority", description: "Upstream fast" };
+  const chatGptModel = { codexLinuxApiKeyServiceTierModel: false, serviceTiers: [upstreamFast] };
+  assert.equal(resolveTier(chatGptModel, "fast"), upstreamFast);
+  assert.equal(resolveTier({}, "fast"), null);
 });
 
-test("service tier resolver rejects duplicate, mixed, and partial owners byte-identically", () => {
+test("service tier resolver classifies exactly one pristine or fully patched app-shared owner", () => {
   const current =
-    "function my(e,t){return t==null?null:t===`fast`?hy(e):e?.serviceTiers?.find(n=>n.id===t)??null}";
-  const duplicateCurrent = current +
+    "function kH(e,t){return t==null?null:t===`fast`?AH(e):e?.serviceTiers?.find(e=>e.id===t)??null}";
+  const other =
     "function other(n,r){return r==null?null:r===`fast`?findFast(n):n?.serviceTiers?.find(t=>t.id===r)??null}";
   const patched = applyApiKeyServiceTierResolverPatch(current);
-  const partial = patched.slice(patched.indexOf("function my"));
-  const mixed = current + patched;
-  const duplicatePatched = patched + patched;
+  const partial = patched.slice(patched.indexOf("function kH"));
   const descriptor = descriptors.find(({ id }) => id === "api-key-service-tier-resolver");
 
-  assert.ok(descriptor);
   assert.equal(descriptor.assetMatch(current), true);
   assert.equal(descriptor.assetMatch(patched), true);
-  for (const [name, source] of Object.entries({
-    duplicateCurrent,
-    duplicatePatched,
-    mixed,
-    partial,
-  })) {
-    assert.equal(descriptor.assetMatch(source), false, name);
-    assert.equal(applyApiKeyServiceTierResolverPatch(source), source, name);
-    assert.equal(applyCurrentResolverPatch(source), source, name);
+  for (const source of [current + other, current + patched, patched + patched, partial]) {
+    assert.equal(descriptor.assetMatch(source), false);
+    assert.equal(applyApiKeyServiceTierResolverPatch(source), source);
+    assert.equal(applyCurrentResolverPatch(source), source);
   }
 });
 

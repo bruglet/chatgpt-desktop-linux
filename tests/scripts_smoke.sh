@@ -42,12 +42,60 @@ assert_contains Makefile 'scripts/select-latest-package.sh'
 assert_contains Makefile 'build-native-feature-helpers'
 assert_contains Makefile 'global-dictation-linux/Cargo.toml --target-dir global-dictation-linux/target'
 assert_absent Makefile "compgen -G \"\$\$1\" | sort -V"
+
+# A positional .deb argument equal to the UPSTREAM_DEB environment value must be
+# accepted as one input: the Makefile forwards UPSTREAM_DEB both through the
+# recipe environment and as the positional $(UPSTREAM_ARG), and install.sh used
+# to reject that documented combination as a duplicate input.
+smoke_parse_args_fixture() {
+    # $1 = UPSTREAM_DEB value, $2 = positional argument, $3 = output path
+    {
+        echo 'error() { echo "error: $*" >&2; exit 1; }'
+        echo "PROVIDED_UPSTREAM_DEB_PATH=\"$1\""
+        sed -n '/^parse_args()/,/^}/p' scripts/lib/install-helpers.sh
+        printf 'parse_args "%s"\n' "$2"
+    } > "$3"
+}
+smoke_parse_args_accepts_matching_env_positional() {
+    local fixture
+    fixture="$(mktemp)"
+    smoke_parse_args_fixture \
+        /tmp/chatgpt_26.915.31945_amd64.deb \
+        /tmp/chatgpt_26.915.31945_amd64.deb \
+        "$fixture"
+    if ! bash "$fixture"; then
+        rm -f "$fixture"
+        fail "parse_args rejected a positional .deb identical to UPSTREAM_DEB"
+    fi
+    rm -f "$fixture"
+}
+smoke_parse_args_rejects_conflicting_paths() {
+    local fixture
+    fixture="$(mktemp)"
+    smoke_parse_args_fixture \
+        /tmp/chatgpt_26.915.31945_amd64.deb \
+        /tmp/chatgpt_26.915.31029_amd64.deb \
+        "$fixture"
+    if bash "$fixture" 2>/dev/null; then
+        rm -f "$fixture"
+        fail "parse_args accepted conflicting upstream .deb paths"
+    fi
+    rm -f "$fixture"
+}
+smoke_parse_args_accepts_matching_env_positional
+smoke_parse_args_rejects_conflicting_paths
 assert_absent launcher/start.sh.template 'local content server'
 assert_contains packaging/linux/control 'official Linux runtime'
 assert_contains packaging/linux/codex-desktop.spec 'official runtime'
 assert_contains flake.nix 'systemd util-linux xdg-utils'
 assert_contains packaging/linux/codex-packaged-runtime.sh 'codex-update-manager check-now'
 assert_absent packaging/linux/codex-packaged-runtime.sh '--if-stale'
+assert_contains scripts/lib/install-helpers.sh 'sudo apt install nodejs npm curl dpkg-dev gnupg'
+# Anchored guards: assert executable code lines, not comment prose, so a
+# removed guard actually fails the smoke run even when the explanatory
+# comment keeps the words. (rg patterns: avoid unescaped regex metachars.)
+assert_contains scripts/lib/asar-patch.sh '^        "npx is required to patch app\.asar with enabled feature descriptors'
+assert_contains scripts/lib/install-helpers.sh '^    if ! command -v npx &>/dev/null; then$'
 
 selector_fixture="$(mktemp -d)"
 trap 'rm -rf -- "$selector_fixture"' EXIT

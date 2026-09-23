@@ -112,22 +112,28 @@ jobs:
           ./install.sh "${{ steps.upstream.outputs.package }}"
           upstream_root="$(mktemp -d)"
           dpkg-deb -x "${{ steps.upstream.outputs.package }}" "$upstream_root"
-          if ! cmp -s "$upstream_root/usr/lib/chatgpt/resources/app.asar" "$CODEX_INSTALL_DIR/resources/app.asar"; then
-            echo "default build did not preserve the signed app.asar byte-for-byte" >&2
-            exit 1
-          fi
-          node - "$CODEX_INSTALL_DIR/.codex-linux/patch-report.json" "$CODEX_INSTALL_DIR/resources/app.asar" <<'NODE'
+          node - "$upstream_root/usr/lib/chatgpt/resources/app.asar" \
+            "$CODEX_INSTALL_DIR/resources/app.asar" \
+            "$CODEX_INSTALL_DIR/.codex-linux/patch-report.json" <<'NODE'
           const crypto = require("node:crypto");
           const fs = require("node:fs");
-          const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const asarSha256 = crypto.createHash("sha256")
-            .update(fs.readFileSync(process.argv[3]))
-            .digest("hex");
+          const sha256 = (file) => crypto.createHash("sha256")
+            .update(fs.readFileSync(file)).digest("hex");
+          const upstreamSha256 = sha256(process.argv[2]);
+          const outputSha256 = sha256(process.argv[3]);
+          const report = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+          const [patch] = report.patches;
           if (report.enabledFeatures.length !== 0
-              || report.patches.length !== 0
-              || report.upstreamAppAsar?.preservedByteForByte !== true
-              || report.upstreamAppAsar?.sha256 !== asarSha256) {
-            throw new Error(`unexpected default patch report: ${JSON.stringify(report)}`);
+              || report.patches.length !== 1
+              || patch.name !== "quit-confirmation-focus"
+              || patch.ciPolicy !== "required-upstream"
+              || patch.sourceKind !== "core"
+              || patch.status !== "applied"
+              || report.upstreamAppAsar?.preservedByteForByte !== false
+              || report.upstreamAppAsar?.sha256 !== upstreamSha256
+              || report.outputAppAsar?.sha256 !== outputSha256
+              || upstreamSha256 === outputSha256) {
+            throw new Error(`unexpected required default patch report: ${JSON.stringify(report)}`);
           }
           NODE
           test -x "$CODEX_INSTALL_DIR/ChatGPT"

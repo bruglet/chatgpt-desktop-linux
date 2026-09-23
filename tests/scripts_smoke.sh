@@ -94,8 +94,8 @@ assert_contains scripts/lib/install-helpers.sh 'sudo apt install nodejs npm curl
 # Anchored guards: assert executable code lines, not comment prose, so a
 # removed guard actually fails the smoke run even when the explanatory
 # comment keeps the words. (rg patterns: avoid unescaped regex metachars.)
-assert_contains scripts/lib/asar-patch.sh '^        "npx is required to patch app\.asar with enabled feature descriptors'
-assert_contains scripts/lib/install-helpers.sh '^    if ! command -v npx &>/dev/null; then$'
+assert_contains scripts/lib/asar-patch.sh '^        command -v npx >/dev/null 2>&1 \|\| error'
+assert_contains scripts/lib/install-helpers.sh '^    if \[ -z "\$\{CODEX_ASAR_BIN:-\}" \] && ! command -v npx &>/dev/null; then$'
 
 selector_fixture="$(mktemp -d)"
 trap 'rm -rf -- "$selector_fixture"' EXIT
@@ -138,8 +138,9 @@ NODE
 node - <<'NODE'
 const { corePatchDescriptors } = require("./scripts/patches/runner.js");
 const descriptors = corePatchDescriptors();
-if (descriptors.length !== 0) {
-  throw new Error("official baseline core patch registry must be empty");
+if (descriptors.length !== 1 || descriptors[0].id !== "quit-confirmation-focus" ||
+    descriptors[0].ciPolicy !== "required-upstream") {
+  throw new Error("Quit confirmation must be the only required core patch");
 }
 NODE
 

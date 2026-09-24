@@ -18,13 +18,30 @@ const {
 } = require("./runner.js");
 
 const emptyConfig = path.join(__dirname, "..", "..", "linux-features", "features.example.json");
+const officialQuitBundle =
+  "function qrt({isWindows:e,quitState:r,windows:i}){" +
+  "let S=!1;l.app.on(`before-quit`,o=>{if(e||r.canQuitWithoutPrompt()){S=!0,i.markAppQuitting();return}" +
+  "if(l.dialog.showMessageBoxSync({message:`Quit?`,buttons:[{messageId:`desktop.quitConfirmation.quit`},`Cancel`]})!==0){o.preventDefault();return}" +
+  "r.markQuitApproved(),S=!0,i.markAppQuitting()})}function next(){}";
 
-test("the Quit confirmation fix is the only required core patch", () => {
-  const [patch] = corePatchDescriptors();
-  assert.equal(corePatchDescriptors().length, 1);
-  assert.equal(patch.id, "quit-confirmation-focus");
-  assert.equal(patch.ciPolicy, "required-upstream");
-  assert.equal(allPatchPolicies({ featuresConfigPath: emptyConfig }).length, 1);
+test("the official Linux baseline registers the required Quit focus patch", () => {
+  assert.deepEqual(
+    corePatchDescriptors().map(({ id, ciPolicy, phase }) => ({ id, ciPolicy, phase })),
+    [{
+      id: "quit-confirmation-focus",
+      ciPolicy: "required-upstream",
+      phase: "main-bundle",
+    }],
+  );
+  assert.deepEqual(
+    allPatchPolicies({ featuresConfigPath: emptyConfig }),
+    [{
+      name: "quit-confirmation-focus",
+      ciPolicy: "required-upstream",
+      phase: "main-bundle",
+      appliesTo: undefined,
+    }],
+  );
   assert.deepEqual(
     requiredPatchNamesForProfile("upstream-build", { featuresConfigPath: emptyConfig }),
     ["quit-confirmation-focus"],
@@ -43,7 +60,7 @@ test("runner context exposes enabled feature IDs", () => {
   }
 });
 
-test("an explicitly empty core registry leaves official extracted files byte-identical", () => {
+test("the default core registry patches the official Quit handler only", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runner-baseline-"));
   try {
     const mainDir = path.join(root, ".vite", "build");
@@ -52,17 +69,20 @@ test("an explicitly empty core registry leaves official extracted files byte-ide
     fs.mkdirSync(webviewDir, { recursive: true });
     const main = path.join(mainDir, "main.js");
     const webview = path.join(webviewDir, "app-initial-A.js");
-    fs.writeFileSync(main, "official-main\n");
+    fs.writeFileSync(main, officialQuitBundle);
     fs.writeFileSync(webview, "official-webview\n");
     const report = createPatchReport();
     patchExtractedApp(root, {
       report,
       featuresConfigPath: emptyConfig,
-      corePatchRoot: path.join(root, "empty-core-registry"),
     });
-    assert.equal(fs.readFileSync(main, "utf8"), "official-main\n");
+    assert.match(fs.readFileSync(main, "utf8"), /function codexLinuxQuitDialogParent\(/);
     assert.equal(fs.readFileSync(webview, "utf8"), "official-webview\n");
-    assert.deepEqual(report.patches, []);
+    assert.equal(report.patches.length, 1);
+    assert.equal(report.patches[0].name, "quit-confirmation-focus");
+    assert.equal(report.patches[0].status, "applied");
+    assert.equal(report.patches[0].ciPolicy, "required-upstream");
+    assert.equal(report.patches[0].sourceKind, "core");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -79,9 +99,12 @@ test("missing main bundle records enabled feature drift", (t) => {
 
   const entry = report.patches.find((patch) =>
     patch.name === "feature:frameless-titlebar:main-process");
+  const coreEntry = report.patches.find((patch) =>
+    patch.name === "quit-confirmation-focus");
   assert.ok(entry);
-  assert.equal(report.patches.find((patch) => patch.name === "quit-confirmation-focus").ciPolicy,
-    "required-upstream");
+  assert.ok(coreEntry);
+  assert.equal(coreEntry.status, "failed-required");
+  assert.equal(coreEntry.unavailable, true);
   assert.equal(entry.status, "skipped-optional");
   assert.equal(entry.enforceWhenEnabled, true);
   assert.equal(entry.unavailable, true);

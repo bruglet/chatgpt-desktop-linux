@@ -5,13 +5,16 @@ const { readSocketPath } = require("./socket-path.js");
 const IDENT = "[A-Za-z_$][\\w$]*";
 
 function findTransportSymbols(source) {
-  const classMatch = source.match(
+  const classMatches = [...source.matchAll(
     new RegExp(
       `var (${IDENT})=class\\{options;kind=\\\`websocket\\\`;logger=${IDENT}\\.${IDENT}\\(\\\`AppServerTransportSshWebsocket\\\`\\)`,
+      "g",
     ),
-  );
+  )];
   const selectionLogIndex = source.indexOf("selected app-server transport");
-  if (classMatch == null || selectionLogIndex < 0 || classMatch.index >= selectionLogIndex) return null;
+  if (classMatches.length !== 1 || selectionLogIndex < 0 ||
+      classMatches[0].index >= selectionLogIndex) return null;
+  const [classMatch] = classMatches;
 
   const sshClassSource = source.slice(classMatch.index, selectionLogIndex);
   const webSocketMatch = sshClassSource.match(
@@ -21,7 +24,7 @@ function findTransportSymbols(source) {
   const [, namespace, webSocketClass, webSocketUrl] = webSocketMatch;
   const lifecycleMatch = sshClassSource.match(
     new RegExp(
-      `${namespace}\\.(${IDENT})\\((${IDENT}),\\{onPongTimeout:[\\s\\S]{0,220}?new ${namespace}\\.(${IDENT})\\(\\2\\)`,
+      `let ${IDENT}=new ${namespace}\\.(${IDENT})\\((${IDENT}),[^;]{0,120}\\);return ${namespace}\\.(${IDENT})\\(\\2,\\{onPongTimeout:`,
     ),
   );
   if (lifecycleMatch == null) return null;
@@ -30,8 +33,8 @@ function findTransportSymbols(source) {
     namespace,
     webSocketClass,
     webSocketUrl,
-    adapterClass: lifecycleMatch[3],
-    keepAlive: lifecycleMatch[1],
+    adapterClass: lifecycleMatch[1],
+    keepAlive: lifecycleMatch[3],
   };
 }
 
@@ -61,9 +64,13 @@ function sharedTransportClassSource(symbols) {
 }
 
 function applySharedAppServerSocketPatch(source) {
-  if (source.includes("class CodexLinuxSharedAppServerSocketTransport")) return source;
-
+  const markerCount = source.split("class CodexLinuxSharedAppServerSocketTransport").length - 1;
   const symbols = findTransportSymbols(source);
+  if (markerCount === 1 && symbols != null) return source;
+  if (markerCount !== 0) {
+    console.warn("WARN: Found incomplete or ambiguous shared app-server socket patch state");
+    return source;
+  }
   if (symbols == null) {
     console.warn("WARN: Could not find SSH WebSocket transport for shared app-server socket patch");
     return source;
@@ -78,7 +85,8 @@ function applySharedAppServerSocketPatch(source) {
   }
   const factorySource = source.slice(factoryStart, factoryEnd);
   const insertionPattern = new RegExp(
-    `(if\\(${symbols.namespace}\\.(${IDENT})\\(e\\.hostConfig\\)\\)return new (${IDENT})\\(\\{hostConfig:e\\.hostConfig,repoRoot:e\\.repoRoot,resourcesPath:e\\.resourcesPath,defaultOriginator:e\\.defaultOriginator\\}\\);)(?=let (${IDENT})=(${IDENT})\\(e\\.hostConfig\\);if\\(\\4\\)\\{)`,
+    `(if\\(${IDENT}\\.${IDENT}\\(e\\.hostConfig\\)\\)return new ${IDENT}\\(\\{hostConfig:e\\.hostConfig,repoRoot:e\\.repoRoot,resourcesPath:e\\.resourcesPath,defaultOriginator:e\\.defaultOriginator\\}\\);)` +
+      `(?=let (${IDENT})=${IDENT}\\(e\\.hostConfig\\);if\\(\\2\\)\\{)`,
     "g",
   );
   const insertionMatches = [...factorySource.matchAll(insertionPattern)];
@@ -89,7 +97,7 @@ function applySharedAppServerSocketPatch(source) {
     return source;
   }
   const configOverridesPattern = new RegExp(
-    `return new ${symbols.namespace}\\.(${IDENT})\\(\\{hostConfig:e\\.hostConfig,repoRoot:e\\.repoRoot,resourcesPath:e\\.resourcesPath,defaultOriginator:e\\.defaultOriginator,getConfigOverrides:(async\\(\\)=>\\[\\.\\.\\.await ${IDENT}\\(e\\)\\])\\}\\)`,
+    `return new ${symbols.namespace}\\.(${IDENT})\\(\\{hostConfig:e\\.hostConfig,repoRoot:e\\.repoRoot,resourcesPath:e\\.resourcesPath,defaultOriginator:e\\.defaultOriginator,getConfigOverrides:(async\\(\\)=>\\[[^\\]]{1,1000}\\])\\}\\)`,
     "g",
   );
   const configOverridesMatches = [...factorySource.matchAll(configOverridesPattern)];

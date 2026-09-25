@@ -34,7 +34,7 @@ const {
 const featureDir = __dirname;
 
 function currentComposerTranscriptFixture() {
-  return "async function send(){let p=`Create an image of a neon cabin`,c={setTranscript(){}},a={dictationSessionId:`session-1`,performance:{mark(){}}},i={action:`send`,recovery:null},s={onRecoveryChange:null,onTranscriptRetry:async()=>{},onTranscriptSend:async(t,e)=>globalThis.events.push([`send`,t,e]),onTranscriptInsert:async(t,e)=>globalThis.events.push([`insert`,t,e]),onTranscriptCancel:()=>globalThis.events.push([`cancel`])},te={current:i};if(p.length>0){c==null?une.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:p}):c.setTranscript(p),a.performance.mark(`transcript_dispatched`);let e=c==null?void 0:a.dictationSessionId;i.recovery!=null&&s.onRecoveryChange!=null?await s.onTranscriptRetry?.(p,e):i.action===`send`?await s.onTranscriptSend(p,e):(await s.onTranscriptInsert(p,e),te.current===i&&te.current.action===`send`&&await s.onTranscriptSend(``,e))}else s.onTranscriptCancel?.()}";
+  return "async function send(){let p=`Create an image of a neon cabin`,c={setTranscript(){}},a={dictationSessionId:`session-1`,performance:{mark(){}}},i={action:`send`,recovery:null},s={chatgpt:null,onRecoveryChange:null,onTranscriptRetry:async()=>{},onTranscriptSend:async(t,e)=>globalThis.events.push([`send`,t,e]),onTranscriptInsert:async(t,e)=>globalThis.events.push([`insert`,t,e]),onTranscriptCancel:()=>globalThis.events.push([`cancel`])},x=null,te={current:i};if(p.length>0||s.chatgpt!=null){c==null&&s.chatgpt==null?une.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:p}):c?.setTranscript(p),a.performance.mark(`transcript_dispatched`);let e=c==null?void 0:a.dictationSessionId;if(i.recovery!=null&&s.onRecoveryChange!=null){await s.onTranscriptRetry?.(p,e,x)}else if(i.action===`send`){let t=x==null?s.onTranscriptSend(p,e):s.onTranscriptSend(p,e,x);await t}else{let t=x==null?s.onTranscriptInsert(p,e):s.onTranscriptInsert(p,e,x);await t,te.current===i&&te.current.action===`send`&&await s.onTranscriptSend(``,e,x)}}else s.onTranscriptCancel?.()}";
 }
 
 function retiredChronicleControllerFixture() {
@@ -681,19 +681,21 @@ test("record-and-replay matches and executes the current composer transcript blo
   ]);
 });
 
+
+
 test("record-and-replay transcript repair rejects duplicate, partial, mixed, and ambiguous owners", () => {
   const current = currentComposerTranscriptFixture();
   const patched = applyRecordReplayDictationTranscriptPatch(current);
   const partial = patched.replace(
-    "onTranscriptInsert(p,e)",
-    "onTranscriptInsert(p)",
+    "transcript_dispatched",
+    "transcript_saved",
   );
   const variants = {
     "duplicate current": current + current,
     "duplicate patched": patched + patched,
     mixed: current + patched,
     partial,
-    ambiguous: current.replace("let e=c==null?void 0:a.dictationSessionId", "let e=c==null?void 0:other.dictationSessionId"),
+    ambiguous: current.replace("else if(i.action===`send`){", "else if(i.action===`send`){if(false){}else if(i.action===`send`){}"),
   };
   const descriptor = descriptors.find((patch) => patch.id === "record-replay-dictation-transcript");
 

@@ -68,6 +68,7 @@ const OLD_REMOTE_LOAD_GATE_ASSET =
 const OLD_REMOTE_CONVERSATION_STATUS_ASSET =
   "app-initial~app-main~projects-index-page~remote-conversation-page-test.js";
 const CURRENT_REMOTE_CONVERSATION_STATUS_ASSET = "app-primary-a0bff570446b.js";
+const CURRENT_REMOTE_REASONING_SUMMARY_ASSET = "app-shared-5c3eff50f08d.js";
 
 function syntheticReasoningSummaryTurnStartBundle() {
   return "async function yY(e,t,n){let s=n,D=n.latestThreadSettings,ee=n.initialParams,me=!fm(e.getHostId());let Ee=e.getDefaultFeatureOverride(vJ)===!0,De=ee?.summary??`none`;D?.summary!==void 0&&(De=D.summary),Ee&&(De=`detailed`),s.summary!==void 0&&(De=s.summary);logger.info(`Reasoning summary turn-start config resolved`,{safe:{concurrentReasoningSummariesFeatureOverrideEnabled:Ee,summary:De}});return{featureOverride:Ee,summary:De}}";
@@ -76,6 +77,7 @@ function syntheticReasoningSummaryTurnStartBundle() {
 function syntheticCurrentReasoningSummaryTurnStartBundle() {
   return "async function HWt(e,t,n,r,i,a,o){let s=n.request,N=a.latestThreadSettings,S=a.initialParams,C=a.configRequirements,ye=N?.summary??`none`;S?.summary!==void 0&&(ye=S.summary),o.reasoningSummaryOverride!=null&&(ye=o.reasoningSummaryOverride),ye=C==null?null:C.model_reasoning_summary??ye,s.summary!==void 0&&(ye=s.summary);logger.info(`Reasoning summary turn-start config resolved`,{safe:{summary:ye}});return{summary:ye}}async function QWt(e,t,n,r,i,a){return await HWt(e,t,n,r,i,a,{canUseProjectlessWorkspace:!gh(e.getHostId()),canMaterializeCodexHomeRoots:!gh(e.getHostId())&&!0,preserveWorkspaceSandboxPolicyWithDefault:gh(e.getHostId()),carryProjectlessRuntimeRoots:!gh(e.getHostId()),latestUseAppServerPermissionDefault:!0,reasoningSummaryOverride:e.getDefaultFeatureOverride(`concurrent_reasoning_summaries`)===!0?`detailed`:null})}";
 }
+
 
 test("remote mobile README assigns every descriptor to one control topology", () => {
   const readme = fs.readFileSync(path.join(__dirname, "README.md"), "utf8");
@@ -340,7 +342,7 @@ function syntheticModernChromeBrowserClientBundle() {
 
 function syntheticCurrentAppServerManagerSignalsBundle() {
   return [
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
+    "function Of({resumeState:a,threadRuntimeStatus:o,threadSummary:r}){return{threadRuntimeStatus:a===`needs_resume`||o?.type===`notLoaded`?r?.threadRuntimeStatus??o??null:o??r?.threadRuntimeStatus??null,resumeState:a}}",
     "class T{onNotification(e){this.resumeNotificationBuffer.buffer(e);this.threadStartedNotificationDeferral.bufferNotification(e)}}",
   ].join("");
 }
@@ -348,7 +350,7 @@ function syntheticCurrentAppServerManagerSignalsBundle() {
 function syntheticCurrentRemoteNotificationLifecycleBundle() {
   return [
     "function Ul(e){return e}",
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
+    "function Of({resumeState:a,threadRuntimeStatus:o,threadSummary:r}){return{threadRuntimeStatus:a===`needs_resume`||o?.type===`notLoaded`?r?.threadRuntimeStatus??o??null:o??r?.threadRuntimeStatus??null,resumeState:a}}",
     "function xm(e,t,n,r){let i=e.items.find(e=>e.id===t);return i?i.type===n?i:(r.error(`Item has unexpected type`,{safe:{itemId:t,type:i.type,expectedType:n},sensitive:{}}),null):(r.error(`Item not found in turn state`,{safe:{itemId:t},sensitive:{}}),null)}",
     "function Sm(e,t){let n=e.items.findIndex(e=>e.id===t.id);n>=0?e.items[n]=t:e.items.push(t)}",
     "function $dt(e,t,n,r){let{manager:i,notificationContext:a,createId:o}=e;switch(t.method){case`turn/started`:{let{threadId:n,turn:r}=t.params,s=Ul(n),c=a.threadStore.conversations.get(s);if(c==null){i.logger.error(`Received turn/started for unknown conversation`,{safe:{conversationId:s},sensitive:{}});break}i.updateConversationState(s,e=>{let t=e.turns.find(e=>e.turnId===r.id);t==null&&(t={turnId:r.id,status:r.status,items:[]},e.turns.push(t)),t.status=r.status});break}case`turn/completed`:{let{threadId:o,turn:s}=t.params,c=Ul(o);if(!a.threadStore.conversations.has(c)){a.unread.discardTurn(c,s.id),i.logger.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:c},sensitive:{}});break}i.updateConversationState(c,e=>{let t=e.turns.find(e=>e.turnId===s.id);t&&(t.status=s.status,e.automationCapability=n)});break}}}",
@@ -370,6 +372,26 @@ function syntheticRemoteTerminalStatusBundle() {
     "var IQt,AQt,OQt=e((()=>{G(),Lr(),Tt(),Ni(),kt(),IQt=s(V,(e,{get:t})=>{let n=t(rr,e);return LQt({hasInProgressSideChat:t(Qw,e),isResponseInProgress:t(ki,e),resumeState:t(si,e)??(n==null?null:`needs_resume`),threadRuntimeStatus:t(Or,e)??n?.threadRuntimeStatus??null,latestTurnHasSystemError:t(Ui,e)===!0})}),AQt=s(V,(e,{get:t})=>RQt({pendingRequestType:t(wr,e)?.type??null,requests:t(fi,e),resumeState:t(si,e),threadRuntimeStatus:t(Or,e)}))}))",
   ].join("");
 }
+
+test("runtime-status recovery accepts only one current thread-summary fallback", () => {
+  const current = "let x={threadRuntimeStatus:a===`needs_resume`||o?.type===`notLoaded`?r?.threadRuntimeStatus??o??null:o??r?.threadRuntimeStatus??null,resumeState:a}";
+  const legacy = "function Of(e,h){e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)}";
+  const nearMiss = "let x={threadRuntimeStatus:a===`needs_resume`?r?.threadRuntimeStatus??null:o,resumeState:a}";
+
+  const accepted = captureWarnings(() =>
+    applyLinuxRemoteMobileConversationHydrationPatch(current),
+  );
+  assert.equal(accepted.result, current);
+  assert.equal(accepted.warnings.some((warning) => warning.includes("runtime-status fallback")), false);
+
+  for (const source of [legacy, nearMiss, current + current]) {
+    const { result, warnings } = captureWarnings(() =>
+      applyLinuxRemoteMobileConversationHydrationPatch(source),
+    );
+    assert.equal(result, source);
+    assert.ok(warnings.some((warning) => warning.includes("one current thread/list runtime-status fallback")));
+  }
+});
 
 function syntheticAppServerManagerStatusBundle() {
   return [
@@ -398,8 +420,7 @@ function syntheticAppMainActiveStatusBundle() {
 
 function syntheticAppMainEnablementBridgeBundle() {
   return [
-    "var tCn=`2055603567`;function OF(){let e=(0,Z.c)(10),{checkGate:t,isLoading:n}=sc(),r;e[0]===t?r=e[1]:(r=t(tCn),e[0]=t,e[1]=r);let i=r,a;e[2]!==t||e[3]!==i?(a=t(`1042620455`)||i,e[2]=t,e[3]=i,e[4]=a):a=e[4];let o=a,s,c;return e[5]!==n||e[6]!==i||e[7]!==o?(s=()=>{n||$o(`set-remote-control-connections-enabled`,{params:{enabled:o,oneToOnePairingInAppEnabled:i}}).catch(e=>{q.warning(`${DF} sync_failed`,{safe:{remoteControlConnectionsEnabled:o},sensitive:{error:e}})})},c=[n,i,o],e[5]=n,e[6]=i,e[7]=o,e[8]=s,e[9]=c):(s=e[8],c=e[9]),(0,Q.useEffect)(s,c),null}",
-    "var DF=`[remote-connections/gate-bridge]`;",
+    "var tCn=`2055603567`;function OF(){let e=(0,Z.c)(10),{checkGate:t,isLoading:n}=sc(),r;e[0]===t?r=e[1]:(r=t(tCn),e[0]=t,e[1]=r);let i=r,a;e[2]!==t||e[3]!==i?(a=t(`1042620455`)||i,e[2]=t,e[3]=i,e[4]=a):a=e[4];let o=a,s,c;return e[5]!==n||e[6]!==i||e[7]!==o?(s=()=>{n||$o(`set-remote-control-connections-enabled`,{params:{enabled:o,oneToOnePairingInAppEnabled:i}}).catch(e=>{q.warning(`[remote-connections/gate-bridge] sync_failed`,{safe:{remoteControlConnectionsEnabled:o},sensitive:{error:e}})})},c=[n,i,o],e[5]=n,e[6]=i,e[7]=o,e[8]=s,e[9]=c):(s=e[8],c=e[9]),(0,Q.useEffect)(s,c),null}",
   ].join("");
 }
 
@@ -990,6 +1011,13 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
       "webview-asset",
     ]);
 
+    const reasoningSummaryDescriptor = descriptors.find((descriptor) =>
+      descriptor.id === "feature:remote-mobile-control:linux-remote-mobile-reasoning-summary-none"
+    );
+    assert.ok(reasoningSummaryDescriptor);
+    assert.equal(reasoningSummaryDescriptor.pattern.test(CURRENT_REMOTE_REASONING_SUMMARY_ASSET), true);
+    assert.equal(reasoningSummaryDescriptor.pattern.test(CURRENT_REMOTE_RUNTIME_ASSET), false);
+
     const visibilityDescriptor = descriptors.find((descriptor) =>
       descriptor.id === "feature:remote-mobile-control:linux-remote-control-visibility"
     );
@@ -1416,12 +1444,11 @@ test("retired reasoning-summary resolver is rejected byte-identically", () => {
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.ok(warnings.some((warning) => warning.includes("turn-start resolver")));
 });
 
-test("prior reasoning-summary resolver without model configuration is rejected byte-identically", () => {
+test("reasoning-summary resolver without model configuration is rejected byte-identically", () => {
   const source = syntheticCurrentReasoningSummaryTurnStartBundle().replace(
     "ye=C==null?null:C.model_reasoning_summary??ye,",
     "",
@@ -1429,7 +1456,6 @@ test("prior reasoning-summary resolver without model configuration is rejected b
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.ok(warnings.some((warning) => warning.includes("turn-start resolver")));
 });
@@ -1440,7 +1466,6 @@ test("duplicate reasoning-summary owner pairs are rejected byte-identically", ()
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.ok(warnings.some((warning) => warning.includes("ambiguous reasoning-summary")));
 });
@@ -1453,7 +1478,6 @@ test("mixed pristine and patched reasoning-summary owner pairs are rejected byte
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.ok(warnings.some((warning) => warning.includes("ambiguous reasoning-summary")));
 });
@@ -1472,7 +1496,6 @@ test("partial reasoning-summary owner pairs are rejected byte-identically", () =
       "",
     ),
   ];
-
   for (const source of partialSources) {
     const { result, warnings } = captureWarnings(() =>
       applyLinuxRemoteMobileReasoningSummaryPatch(source),
@@ -1490,24 +1513,17 @@ test("a reasoning-summary resolver with ambiguous callers is rejected byte-ident
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.ok(warnings.some((warning) => warning.includes("ambiguous or incomplete")));
 });
 
-test("current reasoning-summary owner distinguishes durable mobile hosts and preserves explicit summaries", async () => {
+test("current reasoning-summary owner keeps durable mobile summaries off and preserves explicit summaries", async () => {
   const source = syntheticCurrentReasoningSummaryTurnStartBundle();
   const patched = applyLinuxRemoteMobileReasoningSummaryPatch(source);
-
   assert.notEqual(patched, source);
   assert.match(patched, /codexLinuxRemoteMobileReasoningSummaryNone/);
   assert.match(patched, /codexLinuxRemoteMobileHost:gh\(e\.getHostId\(\)\)&&a\.mode===`durable`/);
-  assert.match(patched, /navigator\.userAgent\.includes\(`Linux`\)&&o\.codexLinuxRemoteMobileHost/);
-  const { result: repatched, warnings } = captureWarnings(() =>
-    applyLinuxRemoteMobileReasoningSummaryPatch(patched),
-  );
-  assert.equal(repatched, patched);
-  assert.deepEqual(warnings, []);
+  assert.equal(applyLinuxRemoteMobileReasoningSummaryPatch(patched), patched);
 
   const context = {
     gh: (hostId) => hostId === "local",
@@ -1527,19 +1543,13 @@ test("current reasoning-summary owner distinguishes durable mobile hosts and pre
     getDefaultFeatureOverride: () => true,
     getHostId: () => hostId,
   });
-
-  const durable = await startTurn(manager("local"), ...args({}, "durable"));
-  const nonDurable = await startTurn(manager("local"), ...args({}, "default"));
-  const remoteDurable = await startTurn(manager("remote-ssh:dev"), ...args({}, "durable"));
-  const explicit = await startTurn(
-    manager("local"),
-    ...args({ summary: "concise" }, "durable"),
+  assert.equal((await startTurn(manager("local"), ...args({}, "durable"))).summary, "none");
+  assert.equal((await startTurn(manager("local"), ...args({}, "default"))).summary, "model");
+  assert.equal((await startTurn(manager("remote-ssh:dev"), ...args({}, "durable"))).summary, "model");
+  assert.equal(
+    (await startTurn(manager("local"), ...args({ summary: "concise" }, "durable"))).summary,
+    "concise",
   );
-
-  assert.equal(durable.summary, "none");
-  assert.equal(nonDurable.summary, "model");
-  assert.equal(remoteDurable.summary, "model");
-  assert.equal(explicit.summary, "concise");
 });
 
 test("Linux remote mobile reasoning-summary patch reports upstream drift", () => {
@@ -1547,7 +1557,6 @@ test("Linux remote mobile reasoning-summary patch reports upstream drift", () =>
   const { result, warnings } = captureWarnings(() =>
     applyLinuxRemoteMobileReasoningSummaryPatch(source),
   );
-
   assert.equal(result, source);
   assert.deepEqual(warnings, [
     "WARN: Could not find reasoning-summary turn-start log marker - skipping Linux remote mobile summary patch",
@@ -2021,8 +2030,6 @@ test("Linux remote mobile hydration buffers and replays late notifications", asy
   const patched = applyLinuxRemoteMobileConversationHydrationPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteMobileThreadRuntimeStatus/);
-  assert.match(patched, /h\?\.type===`active`\|\|h\?\.type===`idle`/);
   assert.match(patched, /codexLinuxRemoteMobilePendingNotifications/);
   assert.match(patched, /codexLinuxRemoteMobileHydrateUnknownConversation/);
   assert.doesNotMatch(patched, /Received (?:turn|item)\/(?:started|completed) for unknown conversation/);
@@ -2032,34 +2039,8 @@ test("Linux remote mobile hydration buffers and replays late notifications", asy
     CIn() {},
     module: { exports: {} },
   };
-  vm.runInNewContext(`${patched};module.exports={normalize:Of,onNotification:tLn};`, context);
-  const { normalize, onNotification } = context.module.exports;
-  const conversation = { resumeState: null, threadRuntimeStatus: null };
-  const input = {
-    conversationId: "thread-a",
-    conversations: new Map([["thread-a", conversation]]),
-    thread: { status: { type: "active" } },
-    updateConversationState(_id, update) {
-      update(conversation);
-    },
-  };
-
-  normalize(input);
-  assert.equal(conversation.threadRuntimeStatus.type, "active");
-
-  conversation.threadRuntimeStatus = null;
-  input.thread.status = { type: "idle" };
-  normalize(input);
-  assert.equal(conversation.threadRuntimeStatus.type, "idle");
-
-  conversation.threadRuntimeStatus = null;
-  input.thread.status = { type: "notLoaded" };
-  normalize(input);
-  assert.equal(conversation.threadRuntimeStatus, null);
-
-  conversation.resumeState = "needs_resume";
-  normalize(input);
-  assert.equal(conversation.threadRuntimeStatus.type, "notLoaded");
+  vm.runInNewContext(`${patched};module.exports={onNotification:tLn};`, context);
+  const { onNotification } = context.module.exports;
 
   let releaseHydration;
   const hydrationReady = new Promise((resolve) => {
@@ -2595,6 +2576,22 @@ test("Linux remote-control enablement bridge loads remote-control clients on Lin
   assert.equal(calls[0].method, "set-remote-control-connections-enabled");
   assert.equal(calls[0].params.enabled, true);
   assert.equal(calls[0].params.oneToOnePairingInAppEnabled, false);
+});
+
+test("Linux remote-control enablement bridge accepts only the current literal log prefix", () => {
+  const current = syntheticCurrentAppMainEnablementBridgeBundle();
+  const patched = applyLinuxRemoteControlEnablementBridgePatch(current);
+  assert.notEqual(patched, current);
+  assert.match(patched, /codexLinuxRemoteControlSelfAutoConnect/u);
+  assert.match(patched, /\[remote-connections\/gate-bridge\] self_auto_connect_failed/u);
+  assert.equal(applyLinuxRemoteControlEnablementBridgePatch(patched), patched);
+
+  const retired = `${current.replace("[remote-connections/gate-bridge] sync_failed", "${DF} sync_failed")}var DF=\`[remote-connections/gate-bridge]\`;`;
+  const { result, warnings } = captureWarnings(() =>
+    applyLinuxRemoteControlEnablementBridgePatch(retired),
+  );
+  assert.doesNotMatch(result, /codexLinuxRemoteControlSelfAutoConnect/u);
+  assert.ok(warnings.some((warning) => warning.includes("self auto-connect needle")));
 });
 
 test("Linux remote-control enablement bridge rejects distant anchors", () => {
@@ -3534,7 +3531,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.match(patchedRemoteConnectionsSettingsFile, /SSH connections from this Linux desktop/);
         assert.match(patchedMobileSetupDialogFile, /Connect your phone to this Linux desktop/);
         assert.match(patchedMobileSetupDialogFile, /apps on this Linux desktop/);
-        assert.match(patchedSignalsFile, /codexLinuxRemoteMobileThreadRuntimeStatus/);
+        assert.match(patchedSignalsFile, /threadRuntimeStatus:[A-Za-z_$][\\w$]*===`needs_resume`/);
         assert.match(patchedTerminalStatusFile, /codexLinuxRemoteTerminalStatusWaitingOnUserInput/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlShouldReadStatus/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlStatusWaitMs/);

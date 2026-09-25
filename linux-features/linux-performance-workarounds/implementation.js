@@ -10,7 +10,7 @@ const SIDEBAR_STYLE =
 const SIDEBAR_WARNING =
   "WARN: Could not uniquely identify the main sidebar scroll container — skipping Linux sidebar scroll performance patch";
 const TAB_WARNING =
-  "WARN: Could not uniquely identify the app-shell tab layout contract — skipping Linux tab layout performance patch";
+  "WARN: Could not uniquely identify the current app-shell tab layout contract — skipping Linux tab layout performance patch";
 const MARKDOWN_WARNING =
   "WARN: Could not uniquely identify the streaming Markdown animation contract — skipping Linux Markdown animation performance patch";
 const TAB_OVERFLOW_HELPER =
@@ -18,20 +18,25 @@ const TAB_OVERFLOW_HELPER =
 
 function markdownRules(source) {
   const unpatched =
-    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:0;animation:_fade-in_\2_1 ([^{}]+);animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:_fade-in-marker_\2_1 \3;animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._ImageEnter_\2_\d+\{transform-origin:50%;animation:\.18s ease-out both _image-enter_\2_1\})/gu;
+    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:0;animation:_fade-in_\2_\d+ ([^{}]+);animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:_fade-in-marker_\2_\d+ \3;animation-delay:var\(--fade-delay,0s\)\}/gu;
   const patched =
-    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:1;animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._ImageEnter_\2_\d+\{transform-origin:50%;animation:\.18s ease-out both _image-enter_\2_1\})/gu;
+    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:1;animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:none\}/gu;
   const candidates = [];
   for (const match of source.matchAll(unpatched)) {
+    const tail = source.slice(match.index + match[0].length, match.index + match[0].length + 1000);
+    const image = tail.match(new RegExp(`^([\\s\\S]*?)(\\._MarkdownRoot_${match[2]}_\\d+\\[data-markdown-animated\\] \\._ImageEnter_${match[2]}_\\d+\\{transform-origin:50%;animation:\\.18s ease-out both _image-enter_${match[2]}_\\d+\\})`, "u"));
+    if (image == null) continue;
     candidates.push({
       start: match.index,
-      end: match.index + match[0].length,
+      end: match.index + match[0].length + image[0].length,
       patched: false,
-      replacement: `${match[1]}{opacity:1;animation:none}${match[4]}{animation:none}${match[5]}`,
+      replacement: `${match[1]}{opacity:1;animation:none}${match[4]}{animation:none}${image[1]}${image[2]}`,
     });
   }
   for (const match of source.matchAll(patched)) {
-    candidates.push({ start: match.index, end: match.index + match[0].length, patched: true, replacement: match[0] });
+    const tail = source.slice(match.index + match[0].length, match.index + match[0].length + 1000);
+    const image = tail.match(new RegExp(`^[\\s\\S]*?\\._MarkdownRoot_${match[2]}_\\d+\\[data-markdown-animated\\] \\._ImageEnter_${match[2]}_\\d+\\{transform-origin:50%;animation:\\.18s ease-out both _image-enter_${match[2]}_\\d+\\}`, "u"));
+    if (image != null) candidates.push({ start: match.index, end: match.index + match[0].length + image[0].length, patched: true, replacement: match[0] + image[0] });
   }
   return candidates;
 }
@@ -61,7 +66,7 @@ function enclosingFunction(source, targetIndex) {
     if (candidate.index > targetIndex) break;
     const open = candidate.index + candidate[0].length - 1;
     const close = findMatchingBrace(source, open);
-    if (close >= targetIndex) enclosing = { start: candidate.index, end: close + 1, name: candidate[1] };
+    if (close >= targetIndex) enclosing = { start: candidate.index, end: close + 1 };
   }
   return enclosing;
 }
@@ -87,41 +92,39 @@ function overflowMeasurements(source) {
 }
 
 function mountAnimations(source) {
-  const pattern = /animate:([A-Za-z_$][\w$]*),"data-app-shell-tab-controller":[A-Za-z_$][\w$]*,[\s\S]{0,300}?exit:([A-Za-z_$][\w$]*),[\s\S]{0,100}?initial:([A-Za-z_$][\w$]*),[\s\S]{0,200}?transition:[A-Za-z_$][\w$]*,onAnimationComplete:/gu;
+  const controllerPattern = /animate:([A-Za-z_$][\w$]*),"data-app-shell-tab-controller":[A-Za-z_$][\w$]*,[\s\S]{0,300}?initial:([A-Za-z_$][\w$]*),[\s\S]{0,300}?transition:[A-Za-z_$][\w$]*,onAnimationComplete:/gu;
   const candidates = [];
-  for (const controller of source.matchAll(pattern)) {
-    const animate = controller[1];
-    const exit = controller[2];
-    const initial = controller[3];
-    const prefixStart = Math.max(0, controller.index - 8000);
-    const prefix = source.slice(prefixStart, controller.index);
-    const vicinity = prefix + source.slice(controller.index, controller.index + 6000);
-    const initialPrefix = `,${initial}=`;
-    const exitPrefix = `,${exit}=`;
-    const exitDeclaration = `let ${escapeRegExp(exitPrefix.slice(1))}`;
-    const unpatched = new RegExp(`${exitDeclaration}([A-Za-z_$][\\w$]*)\\?([A-Za-z_$][\\w$]*):void 0,[\\s\\S]{0,100}?${escapeRegExp(initialPrefix)}(\\1&&![A-Za-z_$][\\w$]*\\?\\2:!1),`, "gu");
-    const patched = new RegExp(`${exitDeclaration}([A-Za-z_$][\\w$]*)\\?([A-Za-z_$][\\w$]*):void 0,[\\s\\S]{0,100}?${escapeRegExp(initialPrefix)}!1,`, "gu");
-    const unpatchedMatches = [...prefix.matchAll(unpatched)];
-    const patchedMatches = [...prefix.matchAll(patched)];
-    const pair = unpatchedMatches.at(-1) ?? patchedMatches.at(-1);
-    if (pair == null) continue;
-    const isPatched = patchedMatches.at(-1) === pair;
-    const selectedAnimation = vicinity.match(
-      new RegExp(`${escapeRegExp(pair[2])}=[A-Za-z_$][\\w$]*\\?([A-Za-z_$][\\w$]*):([A-Za-z_$][\\w$]*)`, "u"),
+  for (const controller of source.matchAll(controllerPattern)) {
+    const owner = enclosingFunction(source, controller.index);
+    if (owner == null) continue;
+    const ownerSource = source.slice(owner.start, owner.end);
+    const initialVar = controller[2];
+    if (!ownerSource.includes("@container/app-shell-tab")) continue;
+    const assignmentPattern = new RegExp(
+      `(?:let |,)${escapeRegExp(initialVar)}=(?<expression>!1|(?<animate>[A-Za-z_$][\\w$]*)\\?(?<collapsed>[A-Za-z_$][\\w$]*):!1),`,
+      "u",
     );
-    const selectedCollapsedAnimation = selectedAnimation != null &&
-      selectedAnimation.slice(1).every((name) =>
-        source.includes(`${name}={maxWidth:\`0px\``));
-    if (
-      !vicinity.includes("@container/app-shell-tab") ||
-      !selectedCollapsedAnimation ||
-      !vicinity.includes(`${animate}=`)
-    ) continue;
-    const declarationStart = prefixStart + pair.index;
-    const relativeInitialStart = pair[0].indexOf(initialPrefix) + initialPrefix.length;
-    const expressionStart = declarationStart + relativeInitialStart;
-    const expression = isPatched ? "!1" : pair[3];
-    candidates.push({ expressionStart, expressionEnd: expressionStart + expression.length, patched: isPatched });
+    const assignment = assignmentPattern.exec(ownerSource);
+    if (assignment == null) continue;
+    const patched = assignment.groups.expression === "!1";
+    if (patched) {
+      if (!/animateLayout:[A-Za-z_$][\w$]*(?:[,}])/u.test(ownerSource)) continue;
+    } else {
+      if (!new RegExp(`animateLayout:${escapeRegExp(assignment.groups.animate)}(?:[,}])`, "u").test(ownerSource)) continue;
+      const collapsedVar = assignment.groups.collapsed;
+      const collapsedSelection = ownerSource.match(
+        new RegExp(`(?:let |,)${escapeRegExp(collapsedVar)}=[A-Za-z_$][\\w$]*\\?([A-Za-z_$][\\w$]*):([A-Za-z_$][\\w$]*),`, "u"),
+      );
+      if (collapsedSelection == null || !collapsedSelection.slice(1).every((name) =>
+        new RegExp("(?:var |,)" + escapeRegExp(name) + "=\\{maxWidth:`0px`", "u").test(source)
+      )) continue;
+    }
+    const relativeExpressionStart = assignment.index + assignment[0].indexOf(assignment.groups.expression);
+    candidates.push({
+      expressionStart: owner.start + relativeExpressionStart,
+      expressionEnd: owner.start + relativeExpressionStart + assignment.groups.expression.length,
+      patched,
+    });
   }
   return candidates;
 }
@@ -130,10 +133,10 @@ function matchesLinuxAppShellTabLayoutPerformanceContract(source) {
   const mounts = mountAnimations(source);
   const measurements = overflowMeasurements(source);
   if (mounts.length !== 1 || measurements.length < 1) return false;
-  const patched = mounts[0].patched && measurements.every(({ patched }) => patched);
-  const unpatched = !mounts[0].patched && measurements.every(({ patched }) => !patched);
+  const patched = mounts[0].patched && measurements.every(({ patched: value }) => value);
+  const pristine = !mounts[0].patched && measurements.every(({ patched: value }) => !value);
   const helper = source.includes(TAB_OVERFLOW_HELPER);
-  return (patched && helper) || (unpatched && !helper);
+  return (patched && helper) || (pristine && !helper);
 }
 
 function applyLinuxAppShellTabLayoutPerformancePatch(source) {
@@ -152,13 +155,15 @@ function applyLinuxAppShellTabLayoutPerformancePatch(source) {
           text: `${measurement.callbackName}=(e,t)=>{codexLinuxScheduleAppShellTabOverflow(t,${measurement.setterName})}`,
         })),
         { start: measurements[0].functionStart, end: measurements[0].functionStart, text: TAB_OVERFLOW_HELPER },
-      ].sort((a, b) => b.start - a.start);
+      ].sort((left, right) => right.start - left.start);
       let result = source;
       for (const edit of edits) result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
       return result;
     }
   }
-  if (source.includes("data-app-shell-tab-controller") && source.includes("@container/app-shell-tab")) console.warn(TAB_WARNING);
+  if (source.includes("data-app-shell-tab-controller") && source.includes("@container/app-shell-tab")) {
+    console.warn(TAB_WARNING);
+  }
   return source;
 }
 

@@ -69,6 +69,43 @@ const OLD_REMOTE_CONVERSATION_STATUS_ASSET =
   "app-initial~app-main~projects-index-page~remote-conversation-page-test.js";
 const CURRENT_REMOTE_CONVERSATION_STATUS_ASSET = "app-primary-a0bff570446b.js";
 const CURRENT_REMOTE_REASONING_SUMMARY_ASSET = "app-shared-5c3eff50f08d.js";
+const VALID_DEVICE_KEY_NONCE = Buffer.alloc(32, 1).toString("base64url");
+const VALID_DEVICE_KEY_DIGEST = Buffer.alloc(32, 2).toString("base64url");
+
+function validEnrollmentPayload(overrides = {}) {
+  return {
+    type: "remoteControlClientEnrollment",
+    nonce: VALID_DEVICE_KEY_NONCE,
+    audience: "remote_control_client_enrollment",
+    challengeId: "challenge_1",
+    targetOrigin: "https://chatgpt.com",
+    targetPath: "/backend-api/codex/remote/control/client/enroll/finish",
+    accountUserId: "user_1",
+    challengeExpiresAt: "2026-09-27T12:00:00.000Z",
+    clientId: "client_1",
+    deviceIdentitySha256Base64url: VALID_DEVICE_KEY_DIGEST,
+    ignoredExtraField: "not-signed",
+    ...overrides,
+  };
+}
+
+function validConnectionPayload(overrides = {}) {
+  return {
+    type: "remoteControlClientConnection",
+    nonce: VALID_DEVICE_KEY_NONCE,
+    audience: "remote_control_client_websocket",
+    targetOrigin: "https://chatgpt.com",
+    targetPath: "/backend-api/codex/remote/control/connect",
+    accountUserId: "user_1",
+    clientId: "client_1",
+    scopes: ["remote_control_controller_websocket"],
+    sessionId: "session_1",
+    tokenExpiresAt: "2026-09-27T12:00:00.000Z",
+    tokenSha256Base64url: VALID_DEVICE_KEY_DIGEST,
+    ignoredExtraField: "not-signed",
+    ...overrides,
+  };
+}
 
 function syntheticReasoningSummaryTurnStartBundle() {
   return "async function yY(e,t,n){let s=n,D=n.latestThreadSettings,ee=n.initialParams,me=!fm(e.getHostId());let Ee=e.getDefaultFeatureOverride(vJ)===!0,De=ee?.summary??`none`;D?.summary!==void 0&&(De=D.summary),Ee&&(De=`detailed`),s.summary!==void 0&&(De=s.summary);logger.info(`Reasoning summary turn-start config resolved`,{safe:{concurrentReasoningSummariesFeatureOverrideEnabled:Ee,summary:De}});return{featureOverride:Ee,summary:De}}";
@@ -117,11 +154,28 @@ test("remote mobile README assigns every descriptor to one control topology", ()
   assert.match(readme, /`get-global-state`/);
 });
 
+function syntheticDeviceKeySerializer({ digestValidator, domainVar, normalizer, noncePattern, nonceValidator, serializer }) {
+  return [
+    `var ${noncePattern}=/^[A-Za-z0-9_-]+$/u;`,
+    `function ${serializer}(e){return Buffer.from(JSON.stringify({domain:${domainVar},payload:${normalizer}(e)}),\`utf8\`)}`,
+    `function ${normalizer}(e){switch(e.type){case\`remoteControlClientConnection\`:if(${nonceValidator}(e.nonce),e.audience!==\`remote_control_client_websocket\`)throw Error(\`Invalid remote-control device-key connection audience\`);if(e.scopes.length!==1||e.scopes[0]!==\`remote_control_controller_websocket\`)throw Error(\`Invalid remote-control device-key connection scopes\`);return ${digestValidator}(e.tokenSha256Base64url),{accountUserId:e.accountUserId,audience:e.audience,clientId:e.clientId,nonce:e.nonce,scopes:e.scopes,sessionId:e.sessionId,targetOrigin:e.targetOrigin,targetPath:e.targetPath,tokenExpiresAt:e.tokenExpiresAt,tokenSha256Base64url:e.tokenSha256Base64url,type:e.type};case\`remoteControlClientEnrollment\`:if(${nonceValidator}(e.nonce),e.audience!==\`remote_control_client_enrollment\`)throw Error(\`Invalid remote-control device-key enrollment audience\`);return ${digestValidator}(e.deviceIdentitySha256Base64url),{accountUserId:e.accountUserId,audience:e.audience,challengeExpiresAt:e.challengeExpiresAt,challengeId:e.challengeId,clientId:e.clientId,deviceIdentitySha256Base64url:e.deviceIdentitySha256Base64url,nonce:e.nonce,targetOrigin:e.targetOrigin,targetPath:e.targetPath,type:e.type}}}`,
+    `function ${nonceValidator}(e){if(!${noncePattern}.test(e)||Buffer.from(e,\`base64url\`).length<32)throw Error(\`Invalid remote-control device-key nonce\`)}`,
+    `function ${digestValidator}(e){if(!${noncePattern}.test(e)||Buffer.from(e,\`base64url\`).length!==32)throw Error(\`Invalid remote-control device-key SHA-256 digest\`)}`,
+  ].join("");
+}
+
 function syntheticMainBundle() {
   return [
     'let i=require("node:path"),o=require("node:fs"),s=require("node:crypto"),h=require("node:child_process"),b={createRequire:()=>()=>({})};',
-    "function TV(e){return Buffer.from(JSON.stringify(e),`utf8`)}",
     "var bV=(0,b.createRequire)(__filename),xV=`remote-control-device-key.node`,SV=`codex-device-key-sign-payload/v1`,wV=class{resourcesPath;addon=null;constructor(e){this.resourcesPath=e}createDeviceKey(e){return this.getAddon().createDeviceKey(e??`hardware_only`)}deleteDeviceKey(e){return this.getAddon().deleteDeviceKey(e)}getDeviceKeyPublic(e){return this.getAddon().getDeviceKeyPublic(e)}async signDeviceKey(e,t){let n=TV(t);return{...await this.getAddon().signDeviceKey(e,n),signedPayloadBase64:n.toString(`base64`)}}getAddon(){if(this.resourcesPath==null)throw Error(`Remote control device keys require resourcesPath`);return this.addon??=bV(i.join(this.resourcesPath,`native`,xV)),this.addon}};",
+    syntheticDeviceKeySerializer({
+      digestValidator: "DV",
+      domainVar: "SV",
+      normalizer: "UV",
+      noncePattern: "CV",
+      nonceValidator: "NV",
+      serializer: "TV",
+    }),
     "function Owner(){this.remoteControlDeviceKeyClient=new wV(null),this.executionHostRegistry={}}",
     "async function mV({codexHome:e,hostConfig:n,logger:r=t.Jr()}){if(n.kind===`local`)try{await hV(i.default.join(e??t.Rr({hostConfig:n,preferWsl:t.Kr(n)}),pV))&&r.info(`Removed remote_control from config before app-server start`)}catch(e){r.warning(`Failed to remove remote_control before app-server start`,{safe:{},sensitive:{error:e}})}}",
   ].join("");
@@ -130,8 +184,15 @@ function syntheticMainBundle() {
 function syntheticCurrentMainBundle() {
   return [
     'let i=require("node:path"),o=require("node:fs"),s=require("node:crypto"),h=require("node:child_process"),b={createRequire:()=>()=>({})};',
-    "function mz(e){return Buffer.from(JSON.stringify({domain:`codex-device-key-sign-payload/v1`,payload:e}),`utf8`)}",
     "var lz=(0,b.createRequire)(__filename),uz=`remote-control-device-key.node`,dz=`codex-device-key-sign-payload/v1`,pz=class{resourcesPath;addon=null;constructor(e){this.resourcesPath=e}createDeviceKey(e){return this.getAddon().createDeviceKey(e??`hardware_only`)}deleteDeviceKey(e){return this.getAddon().deleteDeviceKey(e)}getDeviceKeyPublic(e){return this.getAddon().getDeviceKeyPublic(e)}async signDeviceKey(e,t){let n=mz(t);return{...await this.getAddon().signDeviceKey(e,n),signedPayloadBase64:n.toString(`base64`)}}getAddon(){if(this.resourcesPath==null)throw Error(`Remote control device keys require resourcesPath`);return this.addon??=lz((0,i.join)(this.resourcesPath,`native`,uz)),this.addon}};",
+    syntheticDeviceKeySerializer({
+      digestValidator: "jz",
+      domainVar: "dz",
+      normalizer: "gz",
+      noncePattern: "yz",
+      nonceValidator: "vz",
+      serializer: "mz",
+    }),
     "function Owner(){this.remoteControlDeviceKeyClient=new pz(null),this.executionHostRegistry={}}",
     "async function vV({codexHome:e,hostConfig:n,logger:r=t.Jr()}){if(n.kind===`local`)try{await yV(i.default.join(e??t.Rr({hostConfig:n,preferWsl:t.Kr(n)}),_V))&&r.info(`Removed remote_control from config before app-server start`)}catch(e){r.warning(`Failed to remove remote_control before app-server start`,{safe:{},sensitive:{error:e}})}}",
   ].join("");
@@ -140,8 +201,15 @@ function syntheticCurrentMainBundle() {
 function syntheticCryptoAliasCollisionMainBundle() {
   return [
     'let a=require("node:path"),o=require("node:fs"),c=require("node:crypto"),h=require("node:child_process"),b={createRequire:()=>()=>({})};',
-    "function mz(e){return Buffer.from(JSON.stringify({domain:`codex-device-key-sign-payload/v1`,payload:e}),`utf8`)}",
     "var lz=(0,b.createRequire)(__filename),uz=`remote-control-device-key.node`,dz=`codex-device-key-sign-payload/v1`,pz=class{resourcesPath;addon=null;constructor(e){this.resourcesPath=e}createDeviceKey(e){return this.getAddon().createDeviceKey(e??`hardware_only`)}deleteDeviceKey(e){return this.getAddon().deleteDeviceKey(e)}getDeviceKeyPublic(e){return this.getAddon().getDeviceKeyPublic(e)}async signDeviceKey(e,t){let n=mz(t);return{...await this.getAddon().signDeviceKey(e,n),signedPayloadBase64:n.toString(`base64`)}}getAddon(){if(this.resourcesPath==null)throw Error(`Remote control device keys require resourcesPath`);return this.addon??=lz((0,a.join)(this.resourcesPath,`native`,uz)),this.addon}};",
+    syntheticDeviceKeySerializer({
+      digestValidator: "jz",
+      domainVar: "dz",
+      normalizer: "gz",
+      noncePattern: "yz",
+      nonceValidator: "vz",
+      serializer: "mz",
+    }),
     "function Owner(){this.remoteControlDeviceKeyClient=new pz(null),this.executionHostRegistry={}}",
   ].join("");
 }
@@ -1167,6 +1235,7 @@ test("Linux remote-control feature patch updates the device-key provider", () =>
 
   assert.notEqual(patched, source);
   assert.match(patched, /codexLinuxRemoteControlDeviceKeyClient/);
+  assert.match(patched, /let r=TV\(codexLinuxRemoteControlPayload\)/u);
   assert.match(patched, /remoteControlDeviceKeyClient=process\.platform===`linux`\?codexLinuxRemoteControlDeviceKeyClient\(\):new wV/);
   assert.doesNotMatch(patched, /n\.kind===`local`&&process\.platform!==`linux`/);
   assert.equal(applyLinuxRemoteControlDeviceKeyPatch(patched), patched);
@@ -1178,6 +1247,7 @@ test("Linux remote-control device-key patch handles current minified aliases", (
 
   assert.notEqual(patched, source);
   assert.match(patched, /codexLinuxRemoteControlDeviceKeyClient/);
+  assert.match(patched, /let r=mz\(codexLinuxRemoteControlPayload\)/u);
   assert.match(patched, /remoteControlDeviceKeyClient=process\.platform===`linux`\?codexLinuxRemoteControlDeviceKeyClient\(\):new pz/);
   assert.doesNotMatch(patched, /n\.kind===`local`&&process\.platform!==`linux`/);
   assert.equal(applyLinuxRemoteControlDeviceKeyPatch(patched), patched);
@@ -1196,7 +1266,7 @@ test("Linux remote-control device-key patch rejects ambiguous and unrelated anch
   const requireAnchor =
     "var bV=(0,b.createRequire)(__filename),xV=`remote-control-device-key.node`";
   const providerStart = source.indexOf(",wV=class");
-  const providerEnd = source.indexOf(";function Owner") + 1;
+  const providerEnd = source.indexOf(";var CV") + 1;
   const providerAnchor = source.slice(providerStart, providerEnd);
   const construction =
     "this.remoteControlDeviceKeyClient=new wV(null),this.executionHostRegistry";
@@ -1211,6 +1281,10 @@ test("Linux remote-control device-key patch rejects ambiguous and unrelated anch
       source.slice(providerEnd),
     "duplicate construction anchor": `${source}function Other(){${construction}={}}`,
     "provider linked to another require": source.replace("this.addon??=bV(", "this.addon??=otherRequire("),
+    "provider returns another signed payload": source.replace(
+      "signedPayloadBase64:n.toString(`base64`)",
+      "signedPayloadBase64:t.toString(`base64`)",
+    ),
     "mixed current and patched construction": `${patched}function Other(){${construction}={}}`,
     "partial patched state": partialPatched,
   };
@@ -2798,7 +2872,7 @@ test("Linux remote-control enablement bridge auto-connects this Desktop host wit
   );
 });
 
-test("patched Linux device-key provider can create, sign with, and delete a key", async () => {
+test("patched Linux device-key provider signs upstream-canonical enrollment and connection payloads", async () => {
   const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-store-"));
   try {
     const sharedConfigDirectory = path.join(configHome, "codex-desktop");
@@ -2833,21 +2907,26 @@ test("patched Linux device-key provider can create, sign with, and delete a key"
     const readBack = await client.getDeviceKeyPublic(created.keyId);
     assert.deepEqual(readBack, created);
 
-    const signature = await client.signDeviceKey(created.keyId, {
-      type: "remoteControlClientEnrollment",
-      nonce: "test",
-    });
+    const signature = await client.signDeviceKey(created.keyId, validEnrollmentPayload());
     assert.equal(signature.algorithm, "ecdsa_p256_sha256");
     assert.match(signature.signatureDerBase64, /^[A-Za-z0-9+/]+=*$/);
     assert.match(signature.signedPayloadBase64, /^[A-Za-z0-9+/]+=*$/);
     const signedPayload = Buffer.from(signature.signedPayloadBase64, "base64");
-    assert.deepEqual(JSON.parse(signedPayload.toString("utf8")), {
+    assert.equal(signedPayload.toString("utf8"), JSON.stringify({
       domain: "codex-device-key-sign-payload/v1",
       payload: {
+        accountUserId: "user_1",
+        audience: "remote_control_client_enrollment",
+        challengeExpiresAt: "2026-09-27T12:00:00.000Z",
+        challengeId: "challenge_1",
+        clientId: "client_1",
+        deviceIdentitySha256Base64url: VALID_DEVICE_KEY_DIGEST,
+        nonce: VALID_DEVICE_KEY_NONCE,
+        targetOrigin: "https://chatgpt.com",
+        targetPath: "/backend-api/codex/remote/control/client/enroll/finish",
         type: "remoteControlClientEnrollment",
-        nonce: "test",
       },
-    });
+    }));
     const publicKey = crypto.createPublicKey({
       format: "der",
       key: Buffer.from(created.publicKeySpkiDerBase64, "base64"),
@@ -2863,6 +2942,27 @@ test("patched Linux device-key provider can create, sign with, and delete a key"
       true,
     );
 
+    const connectionSignature = await client.signDeviceKey(created.keyId, validConnectionPayload());
+    assert.equal(
+      Buffer.from(connectionSignature.signedPayloadBase64, "base64").toString("utf8"),
+      JSON.stringify({
+        domain: "codex-device-key-sign-payload/v1",
+        payload: {
+          accountUserId: "user_1",
+          audience: "remote_control_client_websocket",
+          clientId: "client_1",
+          nonce: VALID_DEVICE_KEY_NONCE,
+          scopes: ["remote_control_controller_websocket"],
+          sessionId: "session_1",
+          targetOrigin: "https://chatgpt.com",
+          targetPath: "/backend-api/codex/remote/control/connect",
+          tokenExpiresAt: "2026-09-27T12:00:00.000Z",
+          tokenSha256Base64url: VALID_DEVICE_KEY_DIGEST,
+          type: "remoteControlClientConnection",
+        },
+      }),
+    );
+
     const storeDirectory = path.join(sharedConfigDirectory, "remote-control-device-keys");
     const storePath = path.join(storeDirectory, "remote-control-device-keys-v1.json");
     assert.equal(fs.statSync(sharedConfigDirectory).mode & 0o777, 0o755);
@@ -2871,6 +2971,33 @@ test("patched Linux device-key provider can create, sign with, and delete a key"
 
     await client.deleteDeviceKey(created.keyId);
     await assert.rejects(() => client.getDeviceKeyPublic(created.keyId), /not found/);
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key provider preserves upstream payload validation", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-validation-"));
+  try {
+    const client = createPatchedDeviceKeyClient(configHome);
+    const created = await client.createDeviceKey("allow_os_protected_nonextractable");
+
+    await assert.rejects(
+      () => client.signDeviceKey(created.keyId, validEnrollmentPayload({ nonce: "short" })),
+      /Invalid remote-control device-key nonce/u,
+    );
+    await assert.rejects(
+      () => client.signDeviceKey(created.keyId, validEnrollmentPayload({ audience: "wrong" })),
+      /Invalid remote-control device-key enrollment audience/u,
+    );
+    await assert.rejects(
+      () => client.signDeviceKey(created.keyId, validEnrollmentPayload({ deviceIdentitySha256Base64url: "short" })),
+      /Invalid remote-control device-key SHA-256 digest/u,
+    );
+    await assert.rejects(
+      () => client.signDeviceKey(created.keyId, validConnectionPayload({ scopes: ["wrong"] })),
+      /Invalid remote-control device-key connection scopes/u,
+    );
   } finally {
     fs.rmSync(configHome, { recursive: true, force: true });
   }
@@ -2892,7 +3019,7 @@ test("Linux device-key provider encrypts protected records and decrypts them for
     assert.equal(record.privateKeyPkcs8Pem, undefined);
     assert.doesNotMatch(persistedText, /-----BEGIN PRIVATE KEY-----/u);
 
-    const signature = await client.signDeviceKey(created.keyId, { nonce: "protected" });
+    const signature = await client.signDeviceKey(created.keyId, validEnrollmentPayload());
     assert.equal(signature.algorithm, "ecdsa_p256_sha256");
     assert.equal(storage.calls.encrypt.length, 1);
     assert.equal(storage.calls.decrypt.length, 1);

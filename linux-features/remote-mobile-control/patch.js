@@ -18,7 +18,12 @@ function deviceKeyProviderPattern(flags = "u") {
   return new RegExp(
     `,(?<providerClass>${DEVICE_KEY_IDENT})=class\\{resourcesPath;addon=null;` +
       `constructor\\((?<constructorArg>${DEVICE_KEY_IDENT})\\)\\{this\\.resourcesPath=\\k<constructorArg>\\}` +
-      `[\\s\\S]{0,1200}?getAddon\\(\\)\\{if\\(this\\.resourcesPath==null\\)throw Error` +
+      `[\\s\\S]{0,900}?async signDeviceKey\\((?<keyArg>${DEVICE_KEY_IDENT}),(?<payloadArg>${DEVICE_KEY_IDENT})\\)` +
+      `\\{let (?<serializedPayloadVar>${DEVICE_KEY_IDENT})=(?<serializePayload>${DEVICE_KEY_IDENT})` +
+      `\\(\\k<payloadArg>\\);return\\{\\.\\.\\.await this\\.getAddon\\(\\)\\.signDeviceKey` +
+      `\\(\\k<keyArg>,\\k<serializedPayloadVar>\\),signedPayloadBase64:` +
+      `\\k<serializedPayloadVar>\\.toString\\(\`base64\`\\)\\}\\}` +
+      `getAddon\\(\\)\\{if\\(this\\.resourcesPath==null\\)throw Error` +
       `\\(\`Remote control device keys require resourcesPath\`\\);return this\\.addon\\?\\?=` +
       `(?<requireVar>${DEVICE_KEY_IDENT})\\([\\s\\S]{0,300}?(?<nativeVar>${DEVICE_KEY_IDENT})\\)\\),this\\.addon\\}\\}`,
     flags,
@@ -90,7 +95,7 @@ function replaceOnce(source, needle, replacement) {
   return source.replace(needle, replacement);
 }
 
-function linuxDeviceKeyProviderSource({ childProcessVar, cryptoVar, fsVar, pathVar }) {
+function linuxDeviceKeyProviderSource({ childProcessVar, cryptoVar, fsVar, pathVar, serializePayload }) {
   return [
     `const ${pathVar}=require(\`node:path\`),${fsVar}=require(\`node:fs\`),${cryptoVar}=require(\`node:crypto\`),${childProcessVar}=require(\`node:child_process\`);`,
     "const codexLinuxRemoteControlKeyStoreVersion=2,codexLinuxRemoteControlKeyStoreMaxBytes=1048576,codexLinuxRemoteControlKeyStoreMaxKeys=64;",
@@ -158,7 +163,7 @@ function linuxDeviceKeyProviderSource({ childProcessVar, cryptoVar, fsVar, pathV
     "},",
     "deleteDeviceKey:async codexLinuxRemoteControlKeyId=>codexLinuxWithRemoteControlKeyStoreLock(()=>{let e=codexLinuxReadRemoteControlDeviceKeyStore(),t=codexLinuxRemoteControlMigrateDeviceKeyStore(e)??e;delete t.keys[codexLinuxRemoteControlKeyId],codexLinuxWriteRemoteControlDeviceKeyStore(t)}),",
     "getDeviceKeyPublic:async codexLinuxRemoteControlKeyId=>codexLinuxWithRemoteControlKeyStoreLock(()=>{let e=codexLinuxReadRemoteControlDeviceKeyStore(),t=codexLinuxRemoteControlMigrateDeviceKeyStore(e)??e;t!==e&&codexLinuxWriteRemoteControlDeviceKeyStore(t);let n=t.keys?.[codexLinuxRemoteControlKeyId];if(n==null)throw Error(`Linux remote control device key not found`);return codexLinuxRemoteControlPublicDeviceKey(n)}),",
-    `signDeviceKey:async(codexLinuxRemoteControlKeyId,codexLinuxRemoteControlPayload)=>codexLinuxWithRemoteControlKeyStoreLock(()=>{let e=codexLinuxReadRemoteControlDeviceKeyStore(),t=codexLinuxRemoteControlMigrateDeviceKeyStore(e)??e;t!==e&&codexLinuxWriteRemoteControlDeviceKeyStore(t);let n=t.keys?.[codexLinuxRemoteControlKeyId];if(n==null)throw Error(\`Linux remote control device key not found\`);let r=Buffer.from(JSON.stringify({domain:\`codex-device-key-sign-payload/v1\`,payload:codexLinuxRemoteControlPayload}),\`utf8\`),i=(0,${cryptoVar}.createPrivateKey)(codexLinuxRemoteControlPrivateKeyPem(n)),a=(0,${cryptoVar}.sign)(\`sha256\`,r,i).toString(\`base64\`);return{algorithm:n.algorithm,signatureDerBase64:a,signedPayloadBase64:r.toString(\`base64\`)}})`,
+    `signDeviceKey:async(codexLinuxRemoteControlKeyId,codexLinuxRemoteControlPayload)=>codexLinuxWithRemoteControlKeyStoreLock(()=>{let e=codexLinuxReadRemoteControlDeviceKeyStore(),t=codexLinuxRemoteControlMigrateDeviceKeyStore(e)??e;t!==e&&codexLinuxWriteRemoteControlDeviceKeyStore(t);let n=t.keys?.[codexLinuxRemoteControlKeyId];if(n==null)throw Error(\`Linux remote control device key not found\`);let r=${serializePayload}(codexLinuxRemoteControlPayload),i=(0,${cryptoVar}.createPrivateKey)(codexLinuxRemoteControlPrivateKeyPem(n)),a=(0,${cryptoVar}.sign)(\`sha256\`,r,i).toString(\`base64\`);return{algorithm:n.algorithm,signatureDerBase64:a,signedPayloadBase64:r.toString(\`base64\`)}})`,
     "}}",
   ].join("");
 }
@@ -168,16 +173,22 @@ function deviceKeyPatchState(source) {
   const fsVar = "codexLinuxRemoteControlFs";
   const pathVar = "codexLinuxRemoteControlPath";
   const childProcessVar = "codexLinuxRemoteControlChildProcess";
-  const providerSource = linuxDeviceKeyProviderSource({ childProcessVar, cryptoVar, fsVar, pathVar });
   const requireMatches = [...source.matchAll(deviceKeyRequirePattern("gu"))];
   const providerMatches = [...source.matchAll(deviceKeyProviderPattern("gu"))];
-  const providerSourceCount = source.split(providerSource).length - 1;
 
   if (requireMatches.length !== 1 || providerMatches.length !== 1) {
     return { kind: requireMatches.length > 1 || providerMatches.length > 1 ? "ambiguous" : "partial" };
   }
   const requireMatch = requireMatches[0];
   const providerMatch = providerMatches[0];
+  const providerSource = linuxDeviceKeyProviderSource({
+    childProcessVar,
+    cryptoVar,
+    fsVar,
+    pathVar,
+    serializePayload: providerMatch.groups.serializePayload,
+  });
+  const providerSourceCount = source.split(providerSource).length - 1;
   if (
     requireMatch.groups.requireVar !== providerMatch.groups.requireVar ||
     requireMatch.groups.nativeVar !== providerMatch.groups.nativeVar

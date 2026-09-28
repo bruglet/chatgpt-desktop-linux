@@ -7,7 +7,7 @@ const report = readPatchReport(process.argv[2]);
 const descriptors = loadLinuxFeaturePatchDescriptors();
 const errors = validatePatchReport(report, "upstream-build", {
   requiredEnabledFeatures: enabledLinuxFeatureIds(),
-  requiredSuccessfulPatches: descriptors.map(descriptor => descriptor.name ?? descriptor.id),
+  requiredSuccessfulPatches: descriptors.map(descriptor => descriptor.id),
 });
 // Optional descriptors can drift without failing the upstream builder. A cask
 // release must actually provide every selected ASAR feature.

@@ -1,51 +1,97 @@
 {
   "schemaVersion": 1,
   "ready": true,
-  "version": "26.917.62051",
+  "version": "26.924.22138",
   "revision": 1,
-  "sourceInputSha256": "e5e55bfd18aff59c1fa26b931db97ac50fa9590d501b4ca891f3b96b1ed28026",
+  "sourceInputSha256": "b8fdcd7ae4baea91f96bf8d9aa78ccff62a8f57d756289c1a6e2f914edd3d714",
   "source": {
-    "commit": "be583fc8ae6d89fb11c23960bdf3c5f3218bc043",
-    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/be583fc8ae6d89fb11c23960bdf3c5f3218bc043.tar.gz",
-    "sha256": "aabfcbf5c89afa0d77b72553bba23eb9e8145c750555e8539dc477ab0d4cbe07"
+    "commit": "52472c92c1484e9430b1a9ab9fb3f7c358647f64",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/52472c92c1484e9430b1a9ab9fb3f7c358647f64.tar.gz",
+    "sha256": "1b1cab9954f9ccf310d483078f64072c86cb70d87dd92b6d8cb36f633e31737d"
   },
   "campaign": {
     "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
-    "version": "26.917.62051",
+    "version": "26.924.22138",
     "packages": {
       "amd64": {
         "architecture": "amd64",
-        "version": "26.917.62051",
-        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.917.62051_amd64.deb",
-        "sha256": "75536e3f197c6db8881a634f8bb9b0515184a8eff7cec9be5f408d0f4ae6e696",
-        "size": 420738082
+        "version": "26.924.22138",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.924.22138_amd64.deb",
+        "sha256": "ce3bb1aa82ccdfe3037ada2fd8d187796ea4a0d5ed031d0e4ec8adce8b7014e7",
+        "size": 454131258
       },
       "arm64": {
         "architecture": "arm64",
-        "version": "26.917.62051",
-        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.917.62051_arm64.deb",
-        "sha256": "baf06daf4df10e8642e0d6bf0e7a47da5cb7e2ffe12f44427371d2f325f55924",
-        "size": 399802982
+        "version": "26.924.22138",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.924.22138_arm64.deb",
+        "sha256": "6570f078c5ea25461ce103b2e31fa7dd6c5e717136fa9237c701d22db62b5e3f",
+        "size": 431902234
       }
     },
-    "releaseId": "5dbee440a3013f9dd4e89779e6136d227b8e25be3751847c6c1ee63bee7349f8"
+    "releaseId": "125ffe09108021c1b7da53bd1cd45155b4878ac5a1cc08ed068af25527beb6d2"
   },
   "features": {
     "enabled": [
       "mcp-helper-reaper",
       "node-repl-reaper",
       "tray-usage",
-      "pet-overlay"
-    ]
+      "pet-overlay",
+      "agent-workspace",
+      "appshots",
+      "chronicle-skysight",
+      "computer-use-linux",
+      "flatpak-chrome-native-messaging",
+      "model-picker-default-presets",
+      "record-and-replay"
+    ],
+    "settings": {
+      "model-picker-default-presets": {
+        "presets": [
+          {
+            "model": "gpt-6-luna",
+            "effort": "max"
+          },
+          {
+            "model": "gpt-6-sol",
+            "effort": "medium",
+            "default": true
+          },
+          {
+            "model": "gpt-6-sol",
+            "effort": "high"
+          },
+          {
+            "model": "gpt-6-sol",
+            "effort": "xhigh"
+          },
+          {
+            "model": "gpt-6-astra",
+            "effort": "low"
+          },
+          {
+            "model": "gpt-6-sol",
+            "effort": "max"
+          },
+          {
+            "model": "gpt-6-astra",
+            "effort": "medium"
+          },
+          {
+            "model": "gpt-6-astra",
+            "effort": "high"
+          }
+        ]
+      }
+    }
   },
   "packages": {
     "amd64": {
-      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.917.62051-1.x86_64.rpm",
-      "sha256": "2a557388ff5a76cf0dfd304ed222ed1a9679f69dbbea8bcfd412119b1a17a67d"
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.924.22138-1.x86_64.rpm",
+      "sha256": "c36c14af21c67465dcef6d647e717aed2e1fc186a18a4acb82db7ca777a233c9"
     },
     "arm64": {
-      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.917.62051-1.aarch64.rpm",
-      "sha256": "0a6a22d24ada853abe612235a7016fe5874cc0131f0796d22f19dc444b4c0ac3"
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.924.22138-1.aarch64.rpm",
+      "sha256": "671505c2e314693f16c1b69097a9a0040125ff4d591f99aa402ede915b79a016"
     }
   }
 }

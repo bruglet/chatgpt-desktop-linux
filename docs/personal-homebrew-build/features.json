@@ -1,0 +1,54 @@
+{
+  "enabled": [
+    "mcp-helper-reaper",
+    "node-repl-reaper",
+    "tray-usage",
+    "pet-overlay",
+    "agent-workspace",
+    "appshots",
+    "chronicle-skysight",
+    "computer-use-linux",
+    "flatpak-chrome-native-messaging",
+    "model-picker-default-presets",
+    "record-and-replay"
+  ],
+  "settings": {
+    "model-picker-default-presets": {
+      "presets": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "max"
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "medium",
+          "default": true
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "xhigh"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "low"
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "max"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "medium"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "high"
+        }
+      ]
+    }
+  }
+}

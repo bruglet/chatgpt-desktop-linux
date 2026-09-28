@@ -32,13 +32,25 @@ cask 不会修改 AppArmor 策略、安装系统软件包或关闭 Chromium 沙�
 程序保存在 Homebrew Caskroom 中。桌面文件和图标使用 `$XDG_DATA_HOME`，默认是 `~/.local/share`。
 启动器保留参数和深层链接，并调用现有社区启动器。
 
-启用的功能来自固定源码提交中的 `features.json`：
+启用的功能来自固定源码提交中的 `packaging/homebrew/features.json`。
+这是此 fork 的 cask 功能配置。正常的 Homebrew 更新会保留该配置。
 
 - `mcp-helper-reaper`
 - `node-repl-reaper`
-- `tray-usage`。
+- `tray-usage`
+- `pet-overlay`
+- `agent-workspace`
+- `appshots`
+- `chronicle-skysight`
+- `computer-use-linux`
+- `flatpak-chrome-native-messaging`
+- `model-picker-default-presets`
+- `record-and-replay`
 
-本版本不提供自定义功能选择。官方版和社区版共享 Codex 用户资料，不要同时运行。
+该配置也包含模型预设。cask 在打包应用前编译 Computer Use 和
+Chronicle/Skysight 的辅助程序。新版 cask 必须先通过现有的双架构验证流程。
+
+官方版和社区版共享 Codex 用户资料，不要同时运行。
 若原生安装已占用 `codex-desktop` 命令或桌面文件，请先通过原包管理器卸载冲突的安装。
 不要使用 `--force` 覆盖其他安装的文件。
 

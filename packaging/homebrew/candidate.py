@@ -55,7 +55,7 @@ def main():
     release = {"schemaVersion": 1, "ready": True, "version": campaign["version"], "revision": revision,
                "sourceInputSha256": source_inputs, "source": {"commit": commit, "url": archive_url,
                "sha256": digest(output / "source.tar.gz")}, "campaign": campaign,
-               "features": json.loads((root / "features.json").read_text()), "packages": {}}
+               "features": json.loads((root / "packaging/homebrew/features.json").read_text()), "packages": {}}
     for arch, rpm_arch in [("amd64", "x86_64"), ("arm64", "aarch64")]:
         url = f"https://persistent.oaistatic.com/codex-app-prod/linux/rpm/{rpm_arch}/chatgpt-{release['version']}-1.{rpm_arch}.rpm"
         rpm = output / f"{arch}.rpm"

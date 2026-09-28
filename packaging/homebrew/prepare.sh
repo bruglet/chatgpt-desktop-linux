@@ -15,7 +15,7 @@ CACHE="$(realpath -m "$5")"
 ARCH="$(uname -m)"
 CODEX_APP_ID=codex-desktop
 CODEX_APP_DISPLAY_NAME='ChatGPT Community'
-export CODEX_LINUX_FEATURES_CONFIG="$SCRIPT_DIR/features.json"
+export CODEX_LINUX_FEATURES_CONFIG="$SCRIPT_DIR/packaging/homebrew/features.json"
 export CODEX_LINUX_SOURCE_REMOTE=https://github.com/bruglet/chatgpt-desktop-linux
 export CODEX_LINUX_SOURCE_COMMIT
 CODEX_LINUX_SOURCE_COMMIT="$(node -p 'require(process.argv[1]).source.commit' "$MANIFEST")"
@@ -51,6 +51,21 @@ export npm_config_offline=true
 cd "$SCRIPT_DIR/packaging/homebrew"
 export CODEX_MCP_HELPER_REAPER_SOURCE
 CODEX_MCP_HELPER_REAPER_SOURCE="$(python3 "$SUPPORT" helper "$SCRIPT_DIR/linux-features/mcp-helper-reaper/reaper" "$CACHE")"
+enabled="$(node "$SCRIPT_DIR/scripts/lib/linux-features.js" --enabled)"
+feature_enabled() { grep -Fxq "$1" <<< "$enabled"; }
+native_target="$CACHE/native-target"
+if feature_enabled computer-use-linux; then
+    CARGO_HOME="$CACHE/cargo" cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml" \
+        --target-dir "$native_target" \
+        -p codex-computer-use-linux --bin codex-computer-use-linux --bin codex-computer-use-cosmic
+    export CODEX_COMPUTER_USE_BINARY_SOURCE="$native_target/release/codex-computer-use-linux"
+    export CODEX_COMPUTER_USE_COSMIC_BINARY_SOURCE="$native_target/release/codex-computer-use-cosmic"
+fi
+if feature_enabled chronicle-skysight || feature_enabled record-and-replay; then
+    CARGO_HOME="$CACHE/cargo" cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml" \
+        --target-dir "$native_target" -p codex-record-replay-linux
+    export CODEX_RECORD_REPLAY_LINUX_SOURCE="$native_target/release/codex-record-replay-linux"
+fi
 CODEX_PATCH_REPORT_JSON="$WORK_DIR/patch-report.json"
 patch_asar "$INSTALL_DIR"
 node "$SCRIPT_DIR/packaging/homebrew/verify-report.js" "$CODEX_PATCH_REPORT_JSON"

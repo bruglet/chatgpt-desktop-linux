@@ -32,13 +32,26 @@ The application menu shows **ChatGPT Community**. The command is `codex-desktop`
 The payload stays inside Homebrew's Caskroom. Desktop integration uses `$XDG_DATA_HOME`, or `~/.local/share` by default.
 The launcher forwards command arguments and deep-link URIs to the existing community launcher.
 
-The cask uses the features in the pinned source's `features.json`:
+The cask uses the pinned source's `packaging/homebrew/features.json`. This is
+the fork's cask feature selection. Normal Homebrew updates keep that selection.
 
 - `mcp-helper-reaper`
 - `node-repl-reaper`
-- `tray-usage`.
+- `tray-usage`
+- `pet-overlay`
+- `agent-workspace`
+- `appshots`
+- `chronicle-skysight`
+- `computer-use-linux`
+- `flatpak-chrome-native-messaging`
+- `model-picker-default-presets`
+- `record-and-replay`
 
-Custom feature selection is outside this release. The official and community applications share the Codex profile.
+The feature selection includes the configured model presets. The cask builds the
+Computer Use and Chronicle/Skysight helpers before staging the app. A new cask
+release waits for the existing validation workflow to pass on both architectures.
+
+The official and community applications share the Codex profile.
 Do not run both applications concurrently. An existing native `codex-desktop` command or desktop entry can conflict with this cask.
 Remove the conflicting installation through its package manager before installation. Do not use `--force` to overwrite its files.
 

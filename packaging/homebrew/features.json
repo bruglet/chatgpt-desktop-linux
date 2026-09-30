@@ -9,7 +9,6 @@
     "chronicle-skysight",
     "computer-use-linux",
     "flatpak-chrome-native-messaging",
-    "model-picker-default-presets",
     "record-and-replay"
   ],
   "settings": {
@@ -20,33 +19,29 @@
           "effort": "max"
         },
         {
-          "model": "gpt-6-sol",
+          "model": "gpt-6.1-sol",
+          "effort": "low"
+        },
+        {
+          "model": "gpt-6.1-sol",
           "effort": "medium",
           "default": true
         },
         {
-          "model": "gpt-6-sol",
+          "model": "gpt-6.1-sol",
           "effort": "high"
         },
         {
-          "model": "gpt-6-sol",
+          "model": "gpt-6.1-sol",
           "effort": "xhigh"
         },
         {
-          "model": "gpt-6-astra",
-          "effort": "low"
-        },
-        {
-          "model": "gpt-6-sol",
+          "model": "gpt-6.1-sol",
           "effort": "max"
         },
         {
           "model": "gpt-6-astra",
-          "effort": "medium"
-        },
-        {
-          "model": "gpt-6-astra",
-          "effort": "high"
+          "effort": "xhigh"
         }
       ]
     }

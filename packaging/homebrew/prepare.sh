@@ -73,8 +73,9 @@ run_linux_feature_stage_hooks "$UPSTREAM_APP_DIR"
 
 sed -e 's/__CODEX_LINUX_APP_ID__/codex-desktop/g' \
     -e 's/__CODEX_LINUX_APP_DISPLAY_NAME__/ChatGPT Community/g' \
-    "$SCRIPT_DIR/launcher/start.sh.template" > "$INSTALL_DIR/start.sh"
-chmod 0755 "$INSTALL_DIR/start.sh"
+    "$SCRIPT_DIR/launcher/start.sh.template" > "$INSTALL_DIR/start-real.sh"
+chmod 0755 "$INSTALL_DIR/start-real.sh"
+install -m 0755 "$SCRIPT_DIR/packaging/homebrew/launch.sh" "$INSTALL_DIR/start.sh"
 mkdir -p "$INSTALL_DIR/.codex-linux" "$WORK_DIR/prepared/integration"
 cp "$SCRIPT_DIR/assets/codex-linux.png" "$INSTALL_DIR/.codex-linux/codex-desktop.png"
 cp "$SCRIPT_DIR/assets/codex-linux.png" "$INSTALL_DIR/resources/icon-chatgpt.png"

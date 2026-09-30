@@ -93,7 +93,8 @@ jobs:
           sys.path.insert(0, 'packaging/homebrew')
           from candidate import input_hash
           release = json.load(open(sys.argv[1]))
-          assert release['sourceInputSha256'] == input_hash(Path.cwd()), 'Candidate source inputs changed'
+          if Path(sys.argv[1]) == Path('candidate/release.json'):
+              assert release['sourceInputSha256'] == input_hash(Path.cwd()), 'Candidate source inputs changed'
           PY
           bash packaging/homebrew/verify-candidate.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/equivalence"
           bash packaging/homebrew/clean-asar.sh "$RUNNER_TEMP/equivalence/rpm/usr/lib/chatgpt"

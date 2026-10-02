@@ -631,12 +631,19 @@
         remoteMobile = codexDesktop.override { linuxFeatureIds = [ "remote-mobile-control" ]; };
         computerUse = codexDesktop.override { linuxFeatureIds = [ "computer-use-linux" ]; };
         chronicleSkysight = codexDesktop.override { linuxFeatureIds = [ "chronicle-skysight" ]; };
+        # Maximal profiles keep the historical shared-profile feature set.
+        # Community profile isolation intentionally conflicts with
+        # shared-app-server-socket and is validated by its dedicated signed
+        # feature-only job instead.
+        maximalSharedProfileFeatureIds = lib.filter (
+          featureId: featureId != "community-profile-isolation"
+        ) nixLinuxFeatures.supportedFeatureIds;
         maximalDirectoryFeatureIds = lib.filter (
           featureId: featureId != "shallow-repository-watches"
-        ) nixLinuxFeatures.supportedFeatureIds;
+        ) maximalSharedProfileFeatureIds;
         maximalShallowFeatureIds = lib.filter (
           featureId: featureId != "directory-only-working-tree-watch"
-        ) nixLinuxFeatures.supportedFeatureIds;
+        ) maximalSharedProfileFeatureIds;
         maximalDirectory = codexDesktop.override {
           linuxFeatureIds = maximalDirectoryFeatureIds;
         };

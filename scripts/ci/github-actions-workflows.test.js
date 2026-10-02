@@ -228,6 +228,37 @@ test("install-deps workflow covers apt and pacman Rust bootstrap", () => {
   }
 });
 
+test("Community profile isolation is validated alone against the signed package", () => {
+  const workflow = read(".github/workflows/upstream-build-app.yml");
+  const feature = job(workflow, "community-profile-isolation-feature-alone");
+  assert.match(
+    feature,
+    /ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+  );
+  assert.match(feature, /"enabled": \["community-profile-isolation"\]/);
+  assert.match(feature, /scripts\/lib\/upstream-linux-package\.js/);
+  assert.match(feature, /\.\/install\.sh "\$package"/);
+  assert.match(
+    feature,
+    /node --test linux-features\/community-profile-isolation\/test\.js/,
+  );
+  assert.match(feature, /CODEX_ELECTRON_USER_DATA_PATH/);
+
+  const signedBaseline = job(workflow, "signed-baseline");
+  assert.match(
+    signedBaseline,
+    /Test Community profile isolation against the signed bootstrap/,
+  );
+  assert.match(
+    signedBaseline,
+    /CODEX_SIGNED_EXTRACTED_APP="\$extracted_asar"/,
+  );
+  assert.match(
+    signedBaseline,
+    /node --test linux-features\/community-profile-isolation\/test\.js/,
+  );
+});
+
 test("official Linux metadata expires after seven days", () => {
   const workflow = read(".github/workflows/upstream-build-app.yml");
   const signedBaseline = job(workflow, "signed-baseline");
@@ -240,12 +271,13 @@ test("official Linux gate fails closed unless every dependency succeeds", () => 
   const gate = job(workflow, "official-linux-gate");
   assert.match(
     gate,
-    /^  official-linux-gate:\n    if: \$\{\{ always\(\) \}\}\n    needs:\n      - signed-baseline\n      - package-matrix\n      - dock-icon-feature-alone\n      - watchdog\n    runs-on:/,
+    /^  official-linux-gate:\n    if: \$\{\{ always\(\) \}\}\n    needs:\n      - signed-baseline\n      - package-matrix\n      - community-profile-isolation-feature-alone\n      - dock-icon-feature-alone\n      - watchdog\n    runs-on:/,
   );
 
   for (const [dependency, resultVariable] of [
     ["signed-baseline", "SIGNED_BASELINE_RESULT"],
     ["package-matrix", "PACKAGE_MATRIX_RESULT"],
+    ["community-profile-isolation-feature-alone", "COMMUNITY_PROFILE_ISOLATION_FEATURE_ALONE_RESULT"],
     ["dock-icon-feature-alone", "DOCK_ICON_FEATURE_ALONE_RESULT"],
     ["watchdog", "WATCHDOG_RESULT"],
   ]) {

@@ -43,6 +43,7 @@ cask 不会修改 AppArmor 策略、安装系统软件包或关闭 Chromium 沙�
 - `flatpak-chrome-native-messaging`
 - `record-and-replay`
 
+Record & Replay 也会启用必需的 Chronicle/Skysight 依赖。
 配置保留模型预设，但模型预设功能处于禁用状态。
 cask 在准备应用前编译 Computer Use 和 Record & Replay 辅助程序。
 新版 cask 必须先通过双架构验证。

@@ -43,6 +43,7 @@ the fork's cask feature selection. Normal Homebrew updates keep that selection.
 - `flatpak-chrome-native-messaging`
 - `record-and-replay`
 
+Record & Replay also enables its required Chronicle/Skysight dependency.
 The configuration retains the model presets, but the preset feature is disabled.
 The cask builds the Computer Use and Record & Replay helpers before it prepares the app.
 A new cask release requires successful validation on both architectures.

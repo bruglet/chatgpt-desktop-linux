@@ -39,16 +39,14 @@ cask 不会修改 AppArmor 策略、安装系统软件包或关闭 Chromium 沙�
 - `node-repl-reaper`
 - `tray-usage`
 - `pet-overlay`
-- `agent-workspace`
-- `appshots`
-- `chronicle-skysight`
 - `computer-use-linux`
 - `flatpak-chrome-native-messaging`
-- `model-picker-default-presets`
 - `record-and-replay`
 
-该配置也包含模型预设。cask 在打包应用前编译 Computer Use 和
-Chronicle/Skysight 的辅助程序。新版 cask 必须先通过现有的双架构验证流程。
+Record & Replay 也会启用必需的 Chronicle/Skysight 依赖。
+配置保留模型预设，但模型预设功能处于禁用状态。
+cask 在准备应用前编译 Computer Use 和 Record & Replay 辅助程序。
+新版 cask 必须先通过双架构验证。
 
 官方版和社区版共享 Codex 用户资料，不要同时运行。
 若原生安装已占用 `codex-desktop` 命令或桌面文件，请先通过原包管理器卸载冲突的安装。

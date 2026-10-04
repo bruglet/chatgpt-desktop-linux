@@ -39,17 +39,14 @@ the fork's cask feature selection. Normal Homebrew updates keep that selection.
 - `node-repl-reaper`
 - `tray-usage`
 - `pet-overlay`
-- `agent-workspace`
-- `appshots`
-- `chronicle-skysight`
 - `computer-use-linux`
 - `flatpak-chrome-native-messaging`
-- `model-picker-default-presets`
 - `record-and-replay`
 
-The feature selection includes the configured model presets. The cask builds the
-Computer Use and Chronicle/Skysight helpers before staging the app. A new cask
-release waits for the existing validation workflow to pass on both architectures.
+Record & Replay also enables its required Chronicle/Skysight dependency.
+The configuration retains the model presets, but the preset feature is disabled.
+The cask builds the Computer Use and Record & Replay helpers before it prepares the app.
+A new cask release requires successful validation on both architectures.
 
 The official and community applications share the Codex profile.
 Do not run both applications concurrently. An existing native `codex-desktop` command or desktop entry can conflict with this cask.

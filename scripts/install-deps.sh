@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/linux-target-detect.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/install-deps-rust.sh"
+OS_RELEASE_ID="${OS_RELEASE_ID:-$(os_release_field ID 2>/dev/null || true)}"
+OS_RELEASE_ID_LIKE="${OS_RELEASE_ID_LIKE:-$(os_release_field ID_LIKE 2>/dev/null || true)}"
+OS_RELEASE_VERSION_ID="${OS_RELEASE_VERSION_ID:-$(os_release_field VERSION_ID 2>/dev/null || true)}"
 
 run_privileged() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -116,6 +119,23 @@ install_pacman() {
     run_privileged pacman -Syu --noconfirm --needed "${packages[@]}"
 }
 
+install_emerge() {
+    local -a missing=()
+    local atom
+    for atom in app-shells/bash app-misc/ca-certificates net-misc/curl \
+        app-arch/dpkg dev-vcs/git app-crypt/gnupg dev-build/make \
+        '>=net-libs/nodejs-22.12.0[npm]' dev-lang/python sys-apps/util-linux app-arch/xz-utils; do
+        if [ -z "$(portageq match / "$atom")" ]; then
+            missing+=("$atom")
+        fi
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+        info 'Gentoo build dependencies already installed; skipping emerge.'
+    else
+        run_privileged emerge --noreplace --oneshot "${missing[@]}"
+    fi
+}
+
 install_rust() {
     cargo_works_for_build && rustc_works_for_build && return 0
 
@@ -133,6 +153,7 @@ install_rust() {
 
 manager="$(detect_package_manager)"
 case "$manager" in
+    emerge) install_emerge ;;
     apt) install_apt ;;
     dnf|dnf5) install_dnf ;;
     zypper) install_zypper ;;
@@ -151,5 +172,9 @@ done
 
 node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
 [ "$node_major" -ge 20 ] || fail "Node.js 20 or newer is required; found $(node --version)"
+if [ "$manager" = emerge ]; then
+    node -e 'const [major,minor]=process.versions.node.split(".").map(Number);process.exit(major>22||(major===22&&minor>=12)?0:1)' ||
+        fail "Gentoo ASAR tooling requires Node.js 22.12.0 or newer; found $(node --version)"
+fi
 
 info "ready: node $(node --version), architecture $(uname -m)"

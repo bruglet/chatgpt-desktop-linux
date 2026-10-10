@@ -255,6 +255,7 @@ requirements, known limitations, configuration, and tests.
 
 | Feature ID | Purpose | Documentation |
 |---|---|---|
+| `account-switcher` | Experimental encrypted ChatGPT login switching from the profile menu; requires Secret Service and `secret-tool`; shares local chats and settings | [Docs](linux-features/account-switcher/README.md) |
 | `agent-workspace` | Agent-workspace settings and bridge for hidden desktop environments | [Docs](linux-features/agent-workspace/README.md) |
 | `api-key-model-visibility` | Show models reported by API-key authenticated compatible providers | [Docs](linux-features/api-key-model-visibility/README.md) |
 | `api-key-service-tier` | Fast/service-tier UI for API-key authenticated compatible providers | [Docs](linux-features/api-key-service-tier/README.md) |
@@ -326,6 +327,14 @@ For CSS font fallback lists, the optional
 adds a switch between installed-font lists and manual font-stack entry in
 Appearance. This nested tweak is disabled by default and must be enabled in
 local feature settings before rebuilding.
+
+The optional `ui-tweaks` sub-option `tweaks.selection.moreDetails.enabled`
+restores **More details** in the Codex reply selection menu, asking ChatGPT
+Quick Chat to explain the selected text with its source context. It is disabled
+by default; see the [UI Tweaks configuration](linux-features/ui-tweaks/README.md#selectionmoredetails).
+When testing a local build, launch `codex-app/start.sh` with the same Electron
+flags as your normal desktop entry, including any required `--proxy-server=...`
+argument. Quick Chat becomes available after ChatGPT account initialization.
 
 ## Configure optional features
 

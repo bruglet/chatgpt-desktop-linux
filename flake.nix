@@ -122,7 +122,8 @@
           ++ lib.optionals (
             lib.elem "read-aloud" featureIds || lib.elem "read-aloud-mcp" featureIds
           ) [ pkgs.alsa-utils ]
-          ++ lib.optionals (lib.elem "computer-use-linux" featureIds) [ pkgs.glib ];
+          ++ lib.optionals (lib.elem "computer-use-linux" featureIds) [ pkgs.glib ]
+          ++ lib.optionals (lib.elem "account-switcher" featureIds) [ pkgs.libsecret ];
         runtimePathFor = featureIds:
           lib.makeBinPath (lib.unique (
             baseRuntimePackages ++ featureRuntimePackages featureIds
@@ -632,11 +633,10 @@
         computerUse = codexDesktop.override { linuxFeatureIds = [ "computer-use-linux" ]; };
         chronicleSkysight = codexDesktop.override { linuxFeatureIds = [ "chronicle-skysight" ]; };
         # Maximal profiles keep the historical shared-profile feature set.
-        # Community profile isolation intentionally conflicts with
-        # shared-app-server-socket and is validated by its dedicated signed
-        # feature-only job instead.
+        # Community profile isolation and account switching intentionally
+        # conflict with shared-app-server-socket; enable them separately.
         maximalSharedProfileFeatureIds = lib.filter (
-          featureId: featureId != "community-profile-isolation"
+          featureId: !(lib.elem featureId [ "community-profile-isolation" "account-switcher" ])
         ) nixLinuxFeatures.supportedFeatureIds;
         maximalDirectoryFeatureIds = lib.filter (
           featureId: featureId != "shallow-repository-watches"

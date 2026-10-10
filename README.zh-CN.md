@@ -230,6 +230,7 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 
 | 扩展 ID | 用途 | 文档 |
 |---|---|---|
+| `account-switcher` | 实验性功能：从个人资料菜单切换加密保存的 ChatGPT 登录；需要 Secret Service 和 `secret-tool`；本地聊天和设置共用 | [文档](linux-features/account-switcher/README.md) |
 | `agent-workspace` | 隐藏桌面环境中的 agent-workspace 设置和 bridge | [文档](linux-features/agent-workspace/README.md) |
 | `api-key-model-visibility` | 显示 API-key compatible provider 返回的模型 | [文档](linux-features/api-key-model-visibility/README.md) |
 | `api-key-service-tier` | API-key compatible provider 的 Fast/service-tier UI | [文档](linux-features/api-key-service-tier/README.md) |
@@ -296,6 +297,13 @@ ChatGPT account rollout 和 server-side 功能仍由 OpenAI 控制。重新构�
 [`ui-tweaks` 自定义字体输入](linux-features/ui-tweaks/README.md#appearancecustomfontinput)，
 在外观设置的字体菜单中切换系统字体列表与手填字体栈。这个子选项默认关闭，
 需在本地 feature settings 中启用后重新构建。
+
+`ui-tweaks` 的可选子选项 `tweaks.selection.moreDetails.enabled` 可恢复 Codex
+回复正文选中文字菜单中的“更多详情”，让 ChatGPT Quick Chat 结合原对话上下文解释
+所选文字。此子选项默认关闭；详见 [UI Tweaks 配置](linux-features/ui-tweaks/README.md#selectionmoredetails)。
+测试本地构建时，通过 `codex-app/start.sh` 启动，并保留正常桌面启动器中的
+Electron 参数，包括需要的 `--proxy-server=...`。ChatGPT 账号初始化完成后，
+Quick Chat 入口才会可用。
 
 ## 配置可选扩展
 

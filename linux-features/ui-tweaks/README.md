@@ -32,6 +32,7 @@ Enable it in the local, gitignored feature config:
 | `modelPicker.showModelsByDefault` | `patches/model-picker-model-list.js` | Opens the advanced picker by default and shows model choices inline instead of hiding them behind the compact Power slider and a nested Model submenu. | `tweaks.modelPicker.showModelsByDefault.enabled` |
 | `reasoning.keepEffortLabelsEnglish` | `patches/reasoning-effort-labels.js` | Keeps reasoning effort values in English in the Simplified Chinese UI while leaving the surrounding interface translated. | `tweaks.reasoning.keepEffortLabelsEnglish.enabled` |
 | `selection.moreDetails` | `patches/selected-text-more-details.js` | Restores the Codex reply selection menu's More details action, which asks ChatGPT Quick Chat to explain the selected text. | `tweaks.selection.moreDetails.enabled` |
+| `selection.annotationSubmit` | `patches/selected-text-annotation-submit.js` | After selecting text, Ctrl+Enter sends the active annotation editor's text without being intercepted by the regular composer. | `tweaks.selection.annotationSubmit.enabled` |
 | `sidebar.projectName` | `patches/sidebar-project-name.js` | Styles project names in the left sidebar project list. It does not style `Projects` / `Chats` section headings and does not style chat rows. | `tweaks.sidebar.projectName.enabled`, `tweaks.sidebar.projectName.style` |
 
 ## Settings
@@ -380,6 +381,47 @@ local editor formatting remains usable while those requests are pending.
 
 Set `tweaks.selection.moreDetails.enabled` to `false` and rebuild to restore the
 official Codex selection menu.
+
+### `selection.annotationSubmit`
+
+After selecting text, Ctrl+Enter sends the active annotation editor's text
+without being intercepted by the regular composer.
+
+This tweak is independently disabled by default:
+
+```json
+{
+  "enabled": ["ui-tweaks"],
+  "settings": {
+    "ui-tweaks": {
+      "tweaks": {
+        "selection": {
+          "annotationSubmit": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The annotation text can briefly appear in the regular composer area before it
+is sent. The native local direct-submit path accepts the message locally with
+`acceptLocally: true` and `queueModeOverride: "queue"`. The turn coordinator
+registers a `pending` submission, and the upstream queue preview displays
+`pending` and `sending` messages in the composer panels. This explains why the
+annotation can appear to move into the input area while submission completes.
+
+The same native path builds an empty composer prompt and sets
+`preserveComposerDraft: true` to preserve the regular composer's draft. Source
+inspection supports the queue-preview explanation; the transient DOM during
+the reported visual transition was not captured.
+
+This tweak retains the native preview and submission lifecycle. Suppressing the
+visual transition would require separate handling of queued messages, sending
+progress, and failure/retry states, so that cosmetic change is outside this
+tweak's scope.
 
 ## Drift Behavior
 

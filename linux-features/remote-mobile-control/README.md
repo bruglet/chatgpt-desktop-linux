@@ -34,6 +34,27 @@ Computer Use UI opt-in:
 nix run .#codex-desktop-computer-use-ui-remote-mobile-control
 ```
 
+## Gentoo local ebuild
+
+Gentoo accepts this feature in the generated local ebuild after it is explicitly
+listed in `linux-features/features.json`. Use the existing `make bootstrap-native`
+or `make install-native` workflow; `make gentoo` generates the package without
+installing it after the app has been built. The feature remains disabled by
+default.
+
+The device-key store needs `flock`, supplied by the feature's
+`sys-apps/util-linux` runtime dependency. The cold-start hook is a declarative
+resource, so Gentoo validates its presence and executable mode and preserves
+that mode in the packaged payload. The feature adds no bootstrap or Portage
+build/merge dependency. Portage continues to own native updates with
+`PACKAGE_WITH_UPDATER=0`.
+
+This ebuild uses the existing Desktop-owned app-server path and does not install
+or enable an OpenRC or systemd remote-control service. Package builds have been
+audited on amd64 OpenRC; phone pairing and account-side enrollment still require
+separate runtime validation. Gentoo ARM64 and systemd runtime environments have
+not been tested.
+
 What it changes:
 
 - Replaces the upstream native `remote-control-device-key.node` path with a
@@ -97,11 +118,11 @@ What it changes:
   enablement, pairing, status, and conversation RPCs between two processes.
 - Updates Remote settings and mobile setup copy so the experimental Linux flow
   is not described as Mac-only.
-- Stages `.codex-linux/cold-start.d/remote-mobile-control`, a feature-owned
-  cold-start hook that starts the app-server daemon with `remote-control start`
+- Declaratively stages `.codex-linux/cold-start.d/remote-mobile-control`, a
+  feature-owned cold-start hook that starts the app-server daemon with `remote-control start`
   through the official Codex executable bundled in the Linux package. It does
-  not download or install another CLI. It also stages a single-instance
-  requirement marker.
+  not download or install another CLI. Upstream retains its single-instance
+  lifecycle.
 
 ## Control topology boundaries
 
@@ -150,7 +171,8 @@ Feature-owned surfaces outside the descriptor array are also topology-scoped:
 
 | Surface | Primary responsibility | Contract |
 | --- | --- | --- |
-| `stage.sh` | `mobile-host` | Stages the host marker and cold-start hook while preserving official single-instance and browser routing. |
+| `feature.json` resources | `mobile-host` | Declaratively stages and tracks the cold-start hook with its executable mode. |
+| `stage.sh` | `mobile-host` | Stages host ownership markers while preserving official single-instance and browser routing. |
 | `cold-start-hook.sh` | `mobile-host` | Elects one local remote-control runtime owner and starts only the bundled official Codex fallback. |
 | Nix `codex-remote-control.service` | `mobile-host` | Replaces the bundled-process fallback with one declarative local app-server owner. |
 
@@ -163,11 +185,11 @@ Nix:    Desktop -> codex app-server proxy --sock <owner socket>
                -> Unix control socket -> systemd app-server --remote-control
 ```
 
-The packaged single-instance marker is enforced only in the native topology,
-where a second Desktop would create a second Remote Control owner. In the Nix
-topology, multiple Desktop instances may proxy to the same declarative owner.
-The selected CLI must provide `codex app-server proxy`; this path is validated
-with Codex CLI 0.147.0 and follows the repository's current-CLI policy.
+Upstream owns Desktop's single-instance lifecycle. In the Nix topology, Desktop
+proxies to the same declarative owner. The selected CLI must provide
+`codex app-server proxy` and use a control-socket transport compatible with
+Desktop's stdio protocol. Validate an explicit CLI override against that
+contract.
 
 The main RPC boundaries are:
 
@@ -241,9 +263,10 @@ CODEX_REMOTE_CONTROL_CODEX_PATH=/path/to/codex
 
 KDE Plasma smoke check:
 
-Mobile control depends on the Linux Computer Use backend once the host is
-enrolled. On Plasma/Wayland, verify that the KWin backend is ready after
-building or installing the package:
+Linux Computer Use is optional for remote chats, prompts, approvals, and result
+review. Enable `computer-use-linux` separately only when remote tasks need to
+operate desktop applications. For that additional capability on Plasma/Wayland,
+verify that the KWin backend is ready after building or installing the package:
 
 ```bash
 ./codex-app/resources/plugins/openai-bundled/plugins/unified-computer-use/bin/codex-computer-use-linux doctor

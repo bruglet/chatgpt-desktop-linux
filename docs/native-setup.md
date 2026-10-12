@@ -139,11 +139,18 @@ make bootstrap-native UPSTREAM_DEB=/absolute/path/chatgpt_<version>_amd64.deb
 
 The Gentoo implementation supports glibc hosts and defaults to
 `PACKAGE_WITH_UPDATER=0`. Only features explicitly audited with
-`gentoo.supported: true` are accepted. `ui-tweaks` is audited on amd64 OpenRC and
-remains disabled by default. Its existing cleanup hook needs `flock`, so it
-declares `sys-apps/util-linux` in `gentoo.dependencies.RDEPEND`; no additional
-bootstrap, Portage build, or merge dependencies are introduced. Other repository
-features remain unsupported until separately audited and declared.
+`gentoo.supported: true` are accepted. `ui-tweaks` and `remote-mobile-control`
+have audited package builds on amd64 OpenRC and remain disabled by default.
+Their cleanup and device-key store hooks use `flock`, so each declares
+`sys-apps/util-linux` in `gentoo.dependencies.RDEPEND`; a combined build includes
+that runtime dependency only once. No additional bootstrap, Portage build, or
+merge dependencies are introduced. Other repository features remain unsupported
+until separately audited and declared.
+The [remote mobile feature](../linux-features/remote-mobile-control/README.md)
+uses its existing Desktop-owned app-server and declarative cold-start resource.
+The ebuild does not install an OpenRC or systemd remote-control service, or
+enable Linux Computer Use. Phone pairing and account-side availability require
+a separate runtime check; package acceptance does not establish either.
 Unsupported features or an explicitly enabled updater are rejected before
 building the application. The updater-mode check precedes dependency
 installation; feature checks run after Node is available.

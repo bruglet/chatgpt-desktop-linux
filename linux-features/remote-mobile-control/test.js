@@ -11,9 +11,12 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+require("./gentoo-support.test.js");
+
 const {
   enabledLinuxFeatureStageHooks,
   loadLinuxFeaturePatchDescriptors,
+  stageEnabledLinuxFeatureInstall,
 } = require("../../scripts/lib/linux-features.js");
 const {
   createPatchReport,
@@ -617,6 +620,12 @@ test("remote mobile stage hook preserves official single-instance and browser RP
       applyLinuxRemoteMobileAppServerRemoteControlPatch(syntheticCurrentLocalAppServerLaunchBundle()),
     );
 
+    const featuresConfigPath = path.join(tempRoot, "features.json");
+    fs.writeFileSync(featuresConfigPath, JSON.stringify({ enabled: ["remote-mobile-control"] }));
+    stageEnabledLinuxFeatureInstall(installDir, {
+      featuresRoot: path.join(REPO_ROOT, "linux-features"),
+      featuresConfigPath,
+    });
     const first = runStageHook(env);
     const second = runStageHook(env);
 

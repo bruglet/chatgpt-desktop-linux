@@ -34,6 +34,7 @@ const {
   localComposerResolverContract,
   sliderAssetMatch,
   sliderPatchContract,
+  upstreamDefaultSelectionAssetMatch,
 } = require("./patch.js");
 
 function context(presets) {
@@ -65,13 +66,19 @@ function catalogFixture(name = "FOr") {
   ].join("");
 }
 
+function powerSelectionResolverFixture(name = "Picker") {
+  return [
+    `function ${name}(e,t,n,{enabledReasoningEfforts:r,fallbackModelLabel:i,isTppConversation:a=!1,useMergedPicker:o=!1,modelLimits:s,selectionMode:c=\`default\`,showModelPrefix:l=!1,unavailableModelSlugs:u=new Set}={}){`,
+    "let p=(!(a||o)||c===`model`)&&t!=null?t:e?.options??t??[],",
+    "m=p.flatMap(({slug:e,thinkingEffort:t})=>[{modelSlug:e,thinkingEffort:t??null}]),",
+    'h=e?.sliderSettings?.filter(({modelSlug:e})=>(a||o)&&c==="default"||p.some(({slug:t})=>t===e))??[],',
+    'g=((a||o)&&c==="default"&&h.length>0?h:[...m,...h]).filter(({modelSlug:e})=>!u?.has(e));',
+    "return{isTppConversation:a,selectionMode:c,powerSettings:g}}",
+  ].join("");
+}
+
 function sliderFixture(name = "Wkr") {
   return [
-    "function Power(e,t,n,{includeUltraInSlider:r=false,isTppConversation:i=false,selectionMode:a=`default`}={}){",
-    "let l=e?.options??t??[],u=l.flatMap(({slug:e,thinkingEffort:t})=>[{modelSlug:e,thinkingEffort:t??null}]),",
-    "d=e?.sliderSettings?.filter(({modelSlug:e})=>i&&a===`default`||l.some(({slug:t})=>t===e))??[],",
-    "f=(i&&a===`default`&&d.length>0?d:[...u,...d]);",
-    "return{powerSettings:f,selectionMode:a}}",
     `function ${name}(e){`,
     "let powerSelectionsWithXHigh=e,fallbackPowerSelection=e,",
     "show_xhigh_in_simple_picker=true,canInitializePowerPicker=true;",
@@ -349,32 +356,8 @@ test("slider minimum makes two entries a slider while one stays fixed", () => {
   const patched = applySliderMinimumPatch(source, presets);
   assert.equal(sliderPatchContract(patched), "applied");
   assert.equal((patched.match(new RegExp(SLIDER_PATCH_MARKER, "g")) ?? []).length, 1);
-  assert.equal((patched.match(new RegExp(LOCAL_DEFAULT_PATCH_MARKER, "g")) ?? []).length, 1);
+  assert.equal((patched.match(new RegExp(LOCAL_DEFAULT_PATCH_MARKER, "g")) ?? []).length, 0);
   assert.equal(applySliderMinimumPatch(patched, presets), patched);
-  const catalogWithCustomDefault = {
-    codexLinuxDefaultPresetOptions: [{}],
-    options: [{ slug: "server", thinkingEffort: "min" }],
-    sliderSettings: [
-      { modelSlug: "gpt-6-astra", thinkingEffort: "standard" },
-      { modelSlug: "gpt-5.6-sol", thinkingEffort: "extended" },
-    ],
-  };
-  assert.deepEqual(
-    plain(evaluate(patched, "Power(input,null,null,{isTppConversation:false,selectionMode:'default'}).powerSettings", {
-      input: catalogWithCustomDefault,
-    })),
-    catalogWithCustomDefault.sliderSettings,
-  );
-  assert.equal(
-    plain(
-      evaluate(
-        patched,
-        "Power(input,null,null,{isTppConversation:false,selectionMode:'model'}).powerSettings.length",
-        { input: catalogWithCustomDefault },
-      ),
-    ),
-    1,
-  );
   const configured = [
     { id: "gpt-6-astra:medium" },
     { id: "gpt-5.6-sol:high" },
@@ -401,13 +384,51 @@ test("slider minimum makes two entries a slider while one stays fixed", () => {
   );
 });
 
+test("upstream merged-picker replacement uses configured Default presets but owns explicit selection", () => {
+  const presets = context([
+    { model: "gpt-6-astra", effort: "medium", default: true },
+    { model: "gpt-5.6-sol", effort: "high" },
+  ]);
+  const source = catalogFixture() + powerSelectionResolverFixture("FOrPicker") + sliderFixture();
+  const patched = applySliderMinimumPatch(applyCatalogPatch(source, presets), presets);
+  assert.equal(sliderPatchContract(patched), "applied");
+  const result = plain(evaluate(patched, `(()=>{
+    const merged=FOr(input),explicit=[{slug:"manual-model",thinkingEffort:"extended"}];
+    return {
+      defaults:FOrPicker(merged,explicit,{slug:"manual-model"},{useMergedPicker:true,selectionMode:"default"}).powerSettings,
+      explicit:FOrPicker(merged,explicit,{slug:"manual-model"},{useMergedPicker:true,selectionMode:"model"}).powerSettings
+    }})()`, { input: catalog({ slider_settings: [] }) }));
+  assert.deepEqual(result.defaults, [
+    { modelSlug: "gpt-6-astra", thinkingEffort: "standard" },
+    { modelSlug: "gpt-5.6-sol", thinkingEffort: "extended" },
+  ]);
+  assert.deepEqual(result.explicit, [
+    { modelSlug: "manual-model", thinkingEffort: "extended" },
+  ]);
+});
+
+test("upstream Default-selection compatibility audit fails closed on missing and ambiguous replacements", () => {
+  const presets = context([{ model: "gpt-6-astra", effort: "medium", default: true }]);
+  const fixture = powerSelectionResolverFixture();
+  assert.equal(upstreamDefaultSelectionAssetMatch(fixture, "fixture.js", presets), true);
+  assert.equal(upstreamDefaultSelectionAssetMatch(
+    fixture.replace("useMergedPicker:o=!1", "mergedPicker:o=!1"), "fixture.js", presets,
+  ), false);
+  assert.equal(upstreamDefaultSelectionAssetMatch(
+    fixture.replace('(a||o)&&c==="default"||', 'a&&c==="default"||'), "fixture.js", presets,
+  ), false);
+  assert.equal(upstreamDefaultSelectionAssetMatch(
+    fixture + powerSelectionResolverFixture("DuplicatePicker"), "fixture.js", presets,
+  ), false);
+});
+
 test("slider patch fails closed on drift, duplicate, and partial states", () => {
   const presets = context([{ model: "gpt-6-astra", effort: "medium", default: true }]);
   for (const source of [
     "function unrelated(){}",
     sliderFixture("One") + sliderFixture("Two"),
     sliderFixture().replace("{", `{/*${SLIDER_PATCH_MARKER}*/`),
-    sliderFixture().replace("f=(", `f=(/*${LOCAL_DEFAULT_PATCH_MARKER}*/`),
+    sliderFixture().replace("powerSelectionsWithXHigh.length>=3", "powerSelectionsWithXHigh.length>=2"),
   ]) {
     const { result, warnings } = withCapturedWarnings(() =>
       applySliderMinimumPatch(source, presets),
@@ -869,14 +890,14 @@ test("feature descriptors load alone and alongside ui-tweaks", () => {
       featuresRoot: root,
       featuresConfigPath: configPath,
     });
-    assert.equal(alone.length, 5);
+    assert.equal(alone.length, 6);
     assert.ok(alone.every(({ featureId }) => featureId === "model-picker-default-presets"));
     const [scenario] = require("./feature.json").officialBundleAuditScenarios;
     writeConfig(["model-picker-default-presets"], scenario.settings.presets);
     assert.equal(loadLinuxFeaturePatchDescriptors({
       featuresRoot: root,
       featuresConfigPath: configPath,
-    }).length, 5);
+    }).length, 6);
     writeConfig(["model-picker-default-presets", "ui-tweaks"]);
     const together = loadLinuxFeaturePatchDescriptors({
       featuresRoot: root,

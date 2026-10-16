@@ -110,7 +110,16 @@ unauthenticated app server. This does not test OAuth with real accounts.
 
 Set `CODEX_ACCOUNT_SWITCHER_OFFICIAL_DIR` to a directory containing the original
 signed main and profile-dropdown JavaScript bundles to also run the current
-bundle contract tests. Enabled feature builds fail closed on missing or
-ambiguous anchors. Tests cover encryption, permissions, active-task guards,
+bundle contract tests, or set `CODEX_SIGNED_EXTRACTED_APP` to the extracted ASAR
+root as the signed-baseline CI job does on both architectures.
+Enabled feature builds fail closed on missing or
+ambiguous anchors, including the imported menu-item component. Both menu layouts
+use a fresh import alias so minified local callbacks cannot become components.
+The render regression opens each layout repeatedly with the pet enabled and
+disabled, checks that rendering sends no messages, and exercises the explicit
+account and pet actions. The signed-bundle test also syntax-checks the complete
+profile module as ESM and executes its pet assignment alongside the injected row
+with inert JSX and transport bindings; it does not launch the desktop app.
+Tests cover encryption, permissions, active-task guards,
 cancellation, token refresh preservation, switching, rollback, forgetting,
 storage corruption, authority mismatch, and unexpected OAuth destinations.

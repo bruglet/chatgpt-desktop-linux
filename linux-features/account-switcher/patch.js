@@ -10,6 +10,19 @@ function unique(source, pattern) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function menuItemImport(source, localName) {
+  const bindings = [];
+  for (const declaration of source.matchAll(/\bimport\s*\{([^{}]+)\}\s*from\s*(["'])[^"']+\2/g)) {
+    for (const specifier of declaration[1].split(",")) {
+      const binding = specifier.trim().match(new RegExp(`^(${IDENT})(?:\\s+as\\s+(${IDENT}))?$`));
+      if (binding && (binding[2] ?? binding[1]) === localName) {
+        bindings.push({ index: declaration.index + declaration[0].indexOf("{") + 1, exported: binding[1] });
+      }
+    }
+  }
+  return bindings.length === 1 ? bindings[0] : null;
+}
+
 function applyMain(source) {
   if (source.includes(MAIN_MARKER)) return source;
   const bridge = unique(source, new RegExp(
@@ -57,7 +70,19 @@ function applyUi(source) {
   const [, close] = identity;
   const [, jsxAlias, , additional] = jsx;
   const [, menuItem] = settings;
-  const row = `(0,${jsxAlias}.jsx)(${menuItem},{onClick:()=>{${close}();${dispatch[1]}.dispatchMessage(\`mcp-request\`,{hostId:\`local\`,request:{id:\`community-account-switcher-\`+Date.now(),method:\`community/accountSwitcher\`,params:{locale:${intl[1]}.locale}}})},children:${intl[1]}.locale?.startsWith(\`pl\`)?\`Przełącz konto…\`:${intl[1]}.locale?.startsWith(\`zh\`)?\`切换账户…\`:\`Switch account…\`})`;
+  const binding = menuItemImport(source, menuItem);
+  if (!binding) {
+    console.warn("WARN: Account switcher menu-item import contract drifted - skipping patch");
+    return source;
+  }
+  // Minifiers reuse import aliases inside nested scopes. In the sidebar branch
+  // the settings component's alias can instead name the pet's onClick callback.
+  // A fresh ESM binding keeps the component's identity in both layouts without
+  // eagerly reading an import or depending on the current minified symbol names.
+  let component = "codexLinuxAccountSwitcherMenuItem";
+  for (let suffix = 1; source.includes(component); suffix++) component = `codexLinuxAccountSwitcherMenuItem${suffix}`;
+  source = source.slice(0, binding.index) + `${binding.exported} as ${component},` + source.slice(binding.index);
+  const row = `(0,${jsxAlias}.jsx)(${component},{onClick:()=>{${close}();${dispatch[1]}.dispatchMessage(\`mcp-request\`,{hostId:\`local\`,request:{id:\`community-account-switcher-\`+Date.now(),method:\`community/accountSwitcher\`,params:{locale:${intl[1]}.locale}}})},children:${intl[1]}.locale?.startsWith(\`pl\`)?\`Przełącz konto…\`:${intl[1]}.locale?.startsWith(\`zh\`)?\`切换账户…\`:\`Switch account…\`})`;
   // Keep the existing React memo dependencies: the action references the same
   // onClose callback as the adjacent settings items and contains no account data.
   source = source.replace(jsx[0], jsx[0].replace(`additionalItems:${additional},`,

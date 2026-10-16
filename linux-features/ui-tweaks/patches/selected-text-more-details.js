@@ -139,9 +139,8 @@ function runtimeContract(source) {
   }
   const overrides = uniqueMatch(dispatch.source, `gizmoEditor\\?\\?${IDENT}\\.get\\((${IDENT}),`, "ChatGPT dispatch overrides")[1];
   const sendInit = containingFunction(source, `${overrides}=`);
-  if (!sendInit.source.includes(`${sendInit.name}=e(`)) throw new Error("ChatGPT submission initializer drifted");
   return { init: init.name, capability, blocked, account, session, host, create: create[1], visibility,
-    context: contextWrapper, send: send.name, sendInit: sendInit.name, model,
+    context: contextWrapper, send: send.name, sendInit: sendInit.name, overrides, model,
     status, statusInit: statusInit.name, busy: busy.name, submitting, stopping, dispatch: dispatch.name };
 }
 
@@ -163,7 +162,7 @@ export function ${BINDINGS_EXPORT}() {
   return {capability:${bindings.capability}, blocked:${bindings.blocked}, account:${bindings.account},
     session:${bindings.session}, host:${bindings.host}, create:${bindings.create}, show:${bindings.visibility},
     context:${bindings.context}, send:${bindings.send}, model:${bindings.model}, status:${bindings.status}, busy:${bindings.busy},
-    submitting:${bindings.submitting}, stopping:${bindings.stopping}};
+    submitting:${bindings.submitting}, stopping:${bindings.stopping}, overrides:${bindings.overrides}};
 }
 export function ${OPEN_EXPORT}(scope, input) {
   const bindings = ${BINDINGS_EXPORT}();
@@ -276,7 +275,7 @@ function overlayContract(source) {
   const logger = uniqueMatch(errors.source,
     `(${IDENT})\\.error\\(\\x60\\[Composer\\] side chat failed\\x60`, "selection logger")[1];
   const stateHook = uniqueMatch(errors.source,
-    `${IDENT}=(${IDENT})\\(${IDENT}\\),${IDENT}=${intl}\\(\\)`, "Codex state hook")[1];
+    `${IDENT}=(${IDENT})\\(${IDENT}\\),${IDENT}=${escapeRegExp(intl)}\\(\\)`, "Codex state hook")[1];
   const toastAtoms = [...errors.source.matchAll(new RegExp(`${IDENT}\\.get\\((${IDENT})\\)\\.danger\\(`, "gu"))];
   const toasts = new Set(toastAtoms.map((match) => match[1]));
   if (toasts.size !== 1) throw new Error("Selection error toast contract drifted");

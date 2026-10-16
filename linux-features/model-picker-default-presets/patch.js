@@ -18,6 +18,7 @@ const EXISTING_CHAT_OPTIMISTIC_MARKER =
   "codex-linux-model-picker-default-presets-existing-chat-optimistic-selection";
 const EXISTING_CHAT_PRESET_IDS_KEY = "codexLinuxExistingChatDefaultPresetIds";
 const JS_ASSET_PATTERN = /\.js$/;
+const IDENT = "[A-Za-z_$][\\w$]*";
 const EFFORT_TO_THINKING_EFFORT = Object.freeze({
   none: "zero",
   low: "min",
@@ -419,59 +420,84 @@ function firstFunctionParameter(section) {
 }
 
 function upstreamDefaultSliderCondition(section) {
-  const catalogParameter = firstFunctionParameter(section);
-  if (catalogParameter == null) return null;
-  const pattern =
-    /([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)===([`'"])default\3&&([A-Za-z_$][\w$]*)\.length>0\?\4:/gu;
-  const matches = [...section.source.matchAll(pattern)];
-  if (matches.length !== 1) return null;
+  const signature = new RegExp(
+    `^function ${IDENT}\\((${IDENT}),(${IDENT}),${IDENT},\\{`,
+    "u",
+  ).exec(section?.source ?? "");
+  if (signature == null) return null;
+  const aliases = [
+    ["isTppConversation", "!1"],
+    ["useMergedPicker", "!1"],
+    ["selectionMode", "(?:\\x60default\\x60|'default'|\"default\")"],
+  ].map(([property, fallback]) => [
+    ...section.source.matchAll(
+      new RegExp(`${property}:(${IDENT})=${fallback}`, "gu"),
+    ),
+  ]);
+  if (aliases.some((matches) => matches.length !== 1)) return null;
+  const [tppMode, mergedPicker, selectionMode] = aliases.map(
+    (matches) => matches[0][1],
+  );
+  const explicitPattern = new RegExp(
+    `\\(!\\(${tppMode}\\|\\|${mergedPicker}\\)\\|\\|${selectionMode}===([\\x60'"])model\\1\\)` +
+      `&&${signature[2]}!=null\\?${signature[2]}:`,
+    "gu",
+  );
+  const explicitMatches = [...section.source.matchAll(explicitPattern)];
+  if (explicitMatches.length !== 1) return null;
   return {
-    catalogParameter,
-    match: matches[0][0],
-    selectionMode: matches[0][2],
-    sliderSettings: matches[0][4],
-    tppMode: matches[0][1],
+    catalogParameter: signature[1],
+    explicitMatch: explicitMatches[0][0],
+    mergedPicker,
+    optionsParameter: signature[2],
+    selectionMode,
+    tppMode,
   };
 }
 
 function upstreamSliderFilterCondition(section, defaultCondition) {
-  const quotedDefault = "([`'\"])default\\1";
-  const pattern = new RegExp(
-    `${defaultCondition.tppMode}&&${defaultCondition.selectionMode}===${quotedDefault}\\|\\|`,
+  if (section == null || defaultCondition == null) return null;
+  const { catalogParameter, mergedPicker, selectionMode, tppMode } = defaultCondition;
+  const filterPattern = new RegExp(
+    `(${IDENT})=${catalogParameter}\\?\\.sliderSettings\\?\\.filter\\(\\(\\{modelSlug:${IDENT}\\}\\)=>` +
+      `\\(${tppMode}\\|\\|${mergedPicker}\\)&&${selectionMode}===([\\x60'"])default\\2\\|\\|`,
     "gu",
   );
-  const matches = [...section.source.matchAll(pattern)];
-  return matches.length === 1 ? matches[0][0] : null;
+  const filterMatches = [...section.source.matchAll(filterPattern)];
+  if (filterMatches.length !== 1) return null;
+  const sliderSettings = filterMatches[0][1];
+  const defaultPattern = new RegExp(
+    `\\(\\(${tppMode}\\|\\|${mergedPicker}\\)&&${selectionMode}===([\\x60'"])default\\1&&` +
+      `${sliderSettings}\\.length>0\\?${sliderSettings}:`,
+    "gu",
+  );
+  const defaultMatches = [...section.source.matchAll(defaultPattern)];
+  return defaultMatches.length === 1
+    ? { defaultMatch: defaultMatches[0][0], filterMatch: filterMatches[0][0], sliderSettings }
+    : null;
+}
+
+function upstreamDefaultSelectionAssetMatch(source, _assetName, context = {}) {
+  if (normalizePresets(context).length === 0) return false;
+  const section = powerSelectionResolverSection(source);
+  const condition = upstreamDefaultSliderCondition(section);
+  return upstreamSliderFilterCondition(section, condition) != null;
 }
 
 function sliderPatchContract(source) {
   const markerCount = source.split(SLIDER_PATCH_MARKER).length - 1;
-  const localMarkerCount = source.split(LOCAL_DEFAULT_PATCH_MARKER).length - 1;
   const sliderSection = sliderResolverSection(source);
-  const powerSection = powerSelectionResolverSection(source);
-  const catalogParameter = firstFunctionParameter(powerSection);
-  if (markerCount === 0 && localMarkerCount === 0) {
-    if (sliderSection == null || powerSection == null) return "drifted";
-    const defaultCondition = upstreamDefaultSliderCondition(powerSection);
-    return (sliderSection.source.match(/\.length>=3/g) ?? []).length === 2 &&
-      defaultCondition != null &&
-      upstreamSliderFilterCondition(powerSection, defaultCondition) != null
-      ? "current"
-      : "drifted";
+  if (markerCount === 0) {
+    return sliderSection != null &&
+      (sliderSection.source.match(/\.length>=3/g) ?? []).length === 2
+      ? "current" : "drifted";
   }
   if (
     markerCount === 1 &&
-    localMarkerCount === 1 &&
     sliderSection != null &&
-    powerSection != null &&
     sliderSection.source.includes(`/*${SLIDER_PATCH_MARKER}*/`) &&
-    powerSection.source.includes(`/*${LOCAL_DEFAULT_PATCH_MARKER}*/`) &&
     (sliderSection.source.match(/\.length>=codexLinuxDefaultPresetMinimum\(/g) ?? []).length === 2 &&
-    !sliderSection.source.includes(".length>=3") &&
-    powerSection.source.includes(
-      `let codexLinuxHasDefaultPresets=${catalogParameter}?.${CATALOG_PRESET_OPTIONS_KEY}!=null`,
-    ) &&
-    (powerSection.source.match(/codexLinuxHasDefaultPresets/g) ?? []).length === 3
+    !sliderSection.source.includes(".length>=3")
   ) {
     return "applied";
   }
@@ -501,17 +527,6 @@ function applySliderMinimumPatch(source, context = {}) {
   }
 
   const sliderSection = sliderResolverSection(source);
-  const powerSection = powerSelectionResolverSection(source);
-  const defaultCondition = upstreamDefaultSliderCondition(powerSection);
-  const filterCondition =
-    defaultCondition == null ? null : upstreamSliderFilterCondition(powerSection, defaultCondition);
-  if (defaultCondition == null || filterCondition == null) {
-    warn(
-      "Could not locate the local Default power-selection branch",
-      "model picker Default slider patch",
-    );
-    return source;
-  }
   const configuredIds = presets.map(
     ({ modelSlug, thinkingEffort }) =>
       `${modelSlug}:${THINKING_EFFORT_TO_EFFORT[thinkingEffort]}`,
@@ -527,41 +542,8 @@ function applySliderMinimumPatch(source, context = {}) {
       /([A-Za-z_$][\w$]*)\.length>=3/g,
       "$1.length>=codexLinuxDefaultPresetMinimum($1)",
     );
-  const configuredDefaultCondition =
-    `codexLinuxHasDefaultPresets&&${defaultCondition.selectionMode}===\`default\``;
-  let patchedPowerSection = powerSection.source
-    .replace(filterCondition, `${configuredDefaultCondition}||`)
-    .replace(
-      defaultCondition.match,
-      `${configuredDefaultCondition}&&${defaultCondition.sliderSettings}.length>0?${defaultCondition.sliderSettings}:`,
-    );
-  const bodyOpening = patchedPowerSection.lastIndexOf(
-    "){",
-    patchedPowerSection.indexOf(".sliderSettings"),
-  ) + 1;
-  if (bodyOpening <= 0 || patchedPowerSection[bodyOpening] !== "{") {
-    warn(
-      "Could not locate the power-selection resolver body",
-      "model picker Default slider patch",
-    );
-    return source;
-  }
-  patchedPowerSection =
-    patchedPowerSection.slice(0, bodyOpening + 1) +
-    `/*${LOCAL_DEFAULT_PATCH_MARKER}*/let codexLinuxHasDefaultPresets=${defaultCondition.catalogParameter}?.${CATALOG_PRESET_OPTIONS_KEY}!=null;` +
-    patchedPowerSection.slice(bodyOpening + 1);
-  const replacements = [
-    { ...sliderSection, source: patchedSliderSection },
-    { ...powerSection, source: patchedPowerSection },
-  ].sort((left, right) => right.start - left.start);
-  let patchedSource = source;
-  for (const replacement of replacements) {
-    patchedSource =
-      patchedSource.slice(0, replacement.start) +
-      replacement.source +
-      patchedSource.slice(replacement.end);
-  }
-  return patchedSource;
+  return source.slice(0, sliderSection.start) + patchedSliderSection +
+    source.slice(sliderSection.end);
 }
 
 function localComposerResolverSection(source) {
@@ -956,6 +938,18 @@ function sliderAssetMatch(source, _assetName, context = {}) {
 
 const descriptors = [
   {
+    id: "model-picker-default-presets-upstream-default-selection",
+    phase: "webview-asset",
+    order: 20_797,
+    ciPolicy: "optional",
+    pattern: JS_ASSET_PATTERN,
+    enabled: (context = {}) => normalizePresets(context).length > 0,
+    assetMatch: upstreamDefaultSelectionAssetMatch,
+    missingDescription: "upstream merged model picker Default-selection bundle",
+    skipDescription: "model picker upstream Default-selection compatibility audit",
+    apply: (source) => source,
+  },
+  {
     id: "model-picker-default-presets-catalog",
     phase: "webview-asset",
     order: 20_798,
@@ -1048,4 +1042,5 @@ module.exports = {
   localComposerResolverContract,
   sliderAssetMatch,
   sliderPatchContract,
+  upstreamDefaultSelectionAssetMatch,
 };

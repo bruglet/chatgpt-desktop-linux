@@ -3,7 +3,7 @@ cask "chatgpt-community" do
   arch arm: "aarch64", intel: "x86_64"
   os linux: "linux"
 
-  version "26.1013.31256,1"
+  version "26.1013.31256,2"
   sha256 arm64_linux:  "42471dff10390515c49eaf4d1ccd5bf6b2c7ab457a5f06fafba2697e657a1ce9",
          x86_64_linux: "25bb9c0b7a9d6ac8c3a05240af04e1cd569647b8f658b3ee9d293fc216c21384"
 
@@ -43,12 +43,12 @@ cask "chatgpt-community" do
         "schemaVersion": 1,
         "ready": true,
         "version": "26.1013.31256",
-        "revision": 1,
-        "sourceInputSha256": "222304a7d9d03470e696a11c7a7f5ea5dfb832c91422d9dbdb625cb13e215e21",
+        "revision": 2,
+        "sourceInputSha256": "0530b0c1cb219c16843a54014b50a63a009b4f2a93e70e906b54a6b82e89fa50",
         "source": {
-          "commit": "556d27f7719d74d17af5546db3f44eee7fc12301",
-          "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/556d27f7719d74d17af5546db3f44eee7fc12301.tar.gz",
-          "sha256": "e94a5f85f12c3003159161570742a61da4c71984aa143b33e69a9afa3f41f920"
+          "commit": "11960449d1ec2a6685f562dbd87557b100b3b767",
+          "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/11960449d1ec2a6685f562dbd87557b100b3b767.tar.gz",
+          "sha256": "06608f0ae38aeeff323fee3ff84e25fec89b8822b5e8859d6af179dfc8d5a6f5"
         },
         "campaign": {
           "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",

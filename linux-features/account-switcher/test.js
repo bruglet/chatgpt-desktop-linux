@@ -394,11 +394,11 @@ test("identity uses the current desktop user_id authority ahead of chatgpt_user_
 
 test("semantic contracts preserve renamed symbols, reject partial drift, and route the Polish menu action", async () => {
   const main = 'async function handle(view,message){switch(message.type){case`mcp-request`:{log().debug(`app_server.bridge_received`,{safe:{messageType:`mcp-request`,requestId:String(message.request.id),method:message.request.method,originWebcontentsId:view.id,originHostId:message.hostId}});this.sendAppServerResponseToView();this.appServerConnectionRegistry.getAllHostIds();break}}}async function config(options){return[...helpers.computeConfig(options.globalState,options.hostConfig),...await options.secretAuthStorageConfigOverrides,...await extras(options),mode(options)]}';
-  const ui = 'function Profile(props){let memo=(0,Cache.c)(275),{sidebarFooter:footer,ambientUsage:usage,hideUsage:hidden,open:opened,onClose:close}=props,disabled=hidden!==void 0,scope=read(atom);let fmt=intl();fmt.formatMessage({id:`codex.profileDropdown.copyUserIdForEmail`});let label=`codex.profileDropdown.settingsPage`;let settings=(0,UI.jsx)(Item,{leftIconAsset:asset,keyboardShortcut:shortcut,onClick:settingsClick,children:label});let alternate=(0,UI.jsx)(Layout,{accountIcon:icon,accountSwitcher:switcher,additionalItems:items,onCloseMenu:close});Bridge.dispatchMessage(`avatar-overlay-open`,{});return(0,UI.jsxs)(`div`,{children:[identity,divider,settings,null,workspace,analytics,null,null,more]})}';
+  const ui = 'import{MenuItem as Item}from"./menu.js";function Profile(props){let memo=(0,Cache.c)(275),{sidebarFooter:footer,ambientUsage:usage,hideUsage:hidden,open:opened,onClose:close}=props,disabled=hidden!==void 0,scope=read(atom);let fmt=intl();fmt.formatMessage({id:`codex.profileDropdown.copyUserIdForEmail`});let label=`codex.profileDropdown.settingsPage`;let settings=(0,UI.jsx)(Item,{leftIconAsset:asset,keyboardShortcut:shortcut,onClick:settingsClick,children:label});let alternate=(0,UI.jsx)(Layout,{accountIcon:icon,accountSwitcher:switcher,additionalItems:items,onCloseMenu:close});Bridge.dispatchMessage(`avatar-overlay-open`,{});return(0,UI.jsxs)(`div`,{children:[identity,divider,settings,null,workspace,analytics,null,null,more]})}';
   for (const [source, apply, drift] of [[main, applyMain, "secretAuthStorageConfigOverrides"], [ui, applyUi, "accountSwitcher"]]) {
     const patched = apply(source);
     assert.notEqual(patched, source);
-    new vm.Script(patched);
+    new vm.Script(patched.replace(/import\{[^}]+\}from"\.\/menu.js";/, ""));
     assert.equal(apply(patched), patched);
     assert.equal(apply(source + source), source + source);
     assert.equal(apply(source.replace(drift, "retired")), source.replace(drift, "retired"));
@@ -412,12 +412,19 @@ test("semantic contracts preserve renamed symbols, reject partial drift, and rou
     assert.deepEqual(Array.from(overrides), ["base", "policy", "extras", "mode",
       ...(id === "local" ? ['cli_auth_credentials_store="file"', "features.secret_auth_storage=false"] : [])]);
   }
-  const rows = [...patched.matchAll(/\(0,UI\.jsx\)\(Item,\{onClick:\(\)=>\{close\(\);Bridge\.dispatchMessage[\s\S]*?`Switch account…`\}\)/g)];
+  for (const invalid of [ui.replace('import{MenuItem as Item}from"./menu.js";', ""), 'import{Other as Item}from"./other.js";' + ui]) {
+    assert.equal(applyUi(invalid), invalid, "unverified or ambiguous imports must fail closed");
+  }
+  const collision = applyUi(ui.replace("let fmt=intl()", "let codexLinuxAccountSwitcherMenuItem=0,codexLinuxAccountSwitcherMenuItem1=0,fmt=intl()"));
+  assert.match(collision, /MenuItem as codexLinuxAccountSwitcherMenuItem2,/);
+  const renamed = ui.replaceAll("MenuItem as Item", "RenamedExport as RenamedItem").replaceAll("jsx)(Item,", "jsx)(RenamedItem,");
+  assert.match(applyUi(renamed), /RenamedExport as codexLinuxAccountSwitcherMenuItem,/);
+  const rows = [...patched.matchAll(/\(0,UI\.jsx\)\(codexLinuxAccountSwitcherMenuItem,\{onClick:\(\)=>\{close\(\);Bridge\.dispatchMessage[\s\S]*?`Switch account…`\}\)/g)];
   assert.equal(rows.length, 2);
   const sent = [];
   let closed = 0;
   for (const [row] of rows) {
-    const rendered = vm.runInNewContext(row, { UI: { jsx: (_, props) => props }, Item: {}, close: () => closed++, Bridge: { dispatchMessage: (...args) => sent.push(args) }, fmt: { locale: "pl-PL" } });
+    const rendered = vm.runInNewContext(row, { UI: { jsx: (_, props) => props }, codexLinuxAccountSwitcherMenuItem: {}, close: () => closed++, Bridge: { dispatchMessage: (...args) => sent.push(args) }, fmt: { locale: "pl-PL" } });
     assert.equal(rendered.children, "Przełącz konto…");
     rendered.onClick();
   }
@@ -427,6 +434,57 @@ test("semantic contracts preserve renamed symbols, reject partial drift, and rou
   assert.equal(sent[0][1].hostId, "local");
   assert.equal(sent[0][1].request.method, "community/accountSwitcher");
   assert.equal(sent[0][1].request.params.locale, "pl-PL");
+});
+
+test("rendering either profile layout cannot invoke a shadowing pet callback", () => {
+  const source = 'import{MenuItem as Item}from"./menu.js";function Profile(props){let memo=(0,Cache.c)(275),{sidebarFooter:footer,ambientUsage:usage,hideUsage:hidden,open:opened,onClose:close}=props,scope=read(atom);let fmt=intl();fmt.formatMessage({id:`codex.profileDropdown.copyUserIdForEmail`});let label=`codex.profileDropdown.settingsPage`;let settings=(0,UI.jsx)(Item,{leftIconAsset:asset,keyboardShortcut:shortcut,onClick:settingsClick,children:label});if(footer!=null){let Item=petEnabled?()=>{close();Bridge.dispatchMessage(`avatar-overlay-open`,{})}:void 0;return(0,UI.jsx)(Layout,{accountIcon:icon,accountSwitcher:switcher,additionalItems:items,onTogglePet:Item})}return(0,UI.jsxs)(`div`,{children:[identity,divider,settings,null,workspace,analytics,null,null,more]})}';
+  const patched = applyUi(source);
+  assert.notEqual(patched, source);
+  // Link the fixture's ESM bindings without loading a browser or real profile.
+  const linked = patched.replace(/import\{([^}]+)\}from"\.\/menu.js";/, (_, specifiers) =>
+    specifiers.split(",").map(specifier => {
+      const [exported, local = exported] = specifier.trim().split(/\s+as\s+/);
+      assert.equal(exported, "MenuItem");
+      return `const ${local}=MenuItem;`;
+    }).join(""));
+  for (const sidebarFooter of [null, {}]) for (const petEnabled of [true, false]) {
+    const sent = [], rows = [];
+    let closed = 0, petClick;
+    const jsx = (type, props) => ({ type, props });
+    const MenuItem = props => { rows.push(props); return null; };
+    const context = {
+      MenuItem, petEnabled, UI: { jsx, jsxs: jsx, Fragment: "fragment" },
+      Cache: { c: () => [] }, read: () => null, atom: {}, intl: () => ({ locale: "pl", formatMessage() {} }),
+      Bridge: { dispatchMessage: (...args) => sent.push(args) },
+      Layout: props => { petClick = props.onTogglePet; return props.additionalItems; },
+      asset: null, shortcut: null, settingsClick() {}, icon: null, switcher: null,
+      items: null, identity: null, divider: null, workspace: null, analytics: null, more: null,
+    };
+    const profile = vm.runInNewContext(linked + ";Profile", context);
+    const render = node => {
+      if (Array.isArray(node)) return node.forEach(render);
+      if (!node || typeof node !== "object") return;
+      if (typeof node.type === "function") render(node.type(node.props));
+      else render(node.props.children);
+    };
+    for (let opening = 0; opening < 3; opening++) {
+      rows.length = 0;
+      render(profile({ sidebarFooter, onClose: () => closed++ }));
+      assert.equal(closed, 0, "opening the menu must not close it");
+      assert.equal(sent.length, 0, "rendering must not open the pet or switch accounts");
+      assert.equal(rows.filter(row => row.children === "Przełącz konto…").length, 1);
+    }
+    rows.find(row => row.children === "Przełącz konto…").onClick();
+    assert.equal(closed, 1);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0][0], "mcp-request");
+    assert.equal(sent[0][1].request.method, "community/accountSwitcher");
+    if (sidebarFooter && petEnabled) {
+      petClick();
+      assert.equal(closed, 2);
+      assert.equal(sent[1][0], "avatar-overlay-open", "the explicit pet action must remain available");
+    }
+  }
 });
 
 test("native account menu follows the app locale and marks the current account", async t => {
@@ -490,10 +548,13 @@ test("latest bundled CLI decodes the isolated OAuth file and supports the idle-c
 
 // Use exact current signed-bundle fixtures when supplied by local or CI validation.
 const official = process.env.CODEX_ACCOUNT_SWITCHER_OFFICIAL_DIR;
-test("official main and both profile layouts patch uniquely and remain valid JavaScript", { skip: !official }, () => {
+const signedApp = process.env.CODEX_SIGNED_EXTRACTED_APP;
+test("official main and both profile layouts patch uniquely and remain valid JavaScript", { skip: !official && !signedApp }, () => {
   for (const [prefix, apply] of [["main-", applyMain], ["profile-dropdown-items-", applyUi]]) {
-    const name = fs.readdirSync(official).find(file => file.startsWith(prefix) && file.endsWith(".js"));
-    const source = fs.readFileSync(path.join(official, name), "utf8");
+    const directory = official || path.join(signedApp, prefix === "main-" ? ".vite/build" : "webview/assets");
+    const names = fs.readdirSync(directory).filter(file => file.startsWith(prefix) && file.endsWith(".js"));
+    assert.equal(names.length, 1, `expected a unique ${prefix} bundle`);
+    const source = fs.readFileSync(path.join(directory, names[0]), "utf8");
     const patched = apply(source);
     assert.notEqual(patched, source);
     assert.equal(apply(patched), patched);
@@ -503,6 +564,39 @@ test("official main and both profile layouts patch uniquely and remain valid Jav
       assert.equal(patched.split("app.relaunch(").length, source.split("app.relaunch(").length);
     } else {
       assert.equal(patched.match(/method:`community\/accountSwitcher`/g).length, 2);
+      execFileSync(process.execPath, ["--input-type=module", "--check"], { input: patched, stdio: "pipe" });
+      // Execute the signed bundle's actual pet assignment and injected sidebar
+      // row in the same lexical block, with inert JSX and transport bindings.
+      // Reusing the imported component's minified name here opens the pet during
+      // render (or produces an undefined component when the pet is disabled).
+      const ident = "[A-Za-z_$][\\w$]*";
+      const pets = [...source.matchAll(new RegExp(`(${ident})=(${ident})\\?\\(\\)=>\\{(${ident})\\(\\),(${ident})\\.dispatchMessage\\(\\\`avatar-overlay-open\\\`,\\{\\}\\)\\}:void 0`, "g"))];
+      const rows = [...patched.matchAll(new RegExp(`\\(0,(${ident})\\.jsx\\)\\((${ident}),\\{onClick:\\(\\)=>\\{(${ident})\\(\\);(${ident})\\.dispatchMessage[\\s\\S]*?locale:(${ident})\\.locale[\\s\\S]*?\\\`Switch account…\\\`\\}\\)`, "g"))];
+      assert.equal(pets.length, 1, "expected a unique pet callback in the signed bundle");
+      assert.equal(rows.length, 2);
+      const pet = pets[0], row = rows[0];
+      assert.equal(pet[3], row[3]);
+      assert.equal(pet[4], row[4]);
+      assert.notEqual(pet[1], row[2], "sidebar component must not resolve to the pet callback");
+      for (const enabled of [true, false]) {
+        const sent = [], rendered = [];
+        let closed = 0;
+        const component = props => { rendered.push(props); return null; };
+        const element = vm.runInNewContext(`(()=>{let ${pet[0]};return ${row[0]}})()`, {
+          [pet[2]]: enabled, [row[1]]: { jsx: (type, props) => ({ type, props }) },
+          [row[2]]: component, [row[3]]: () => closed++,
+          [row[4]]: { dispatchMessage: (...args) => sent.push(args) }, [row[5]]: { locale: "pl" },
+        });
+        assert.equal(element.type, component);
+        element.type(element.props);
+        assert.equal(rendered.length, 1);
+        assert.equal(closed, 0);
+        assert.equal(sent.length, 0);
+        rendered[0].onClick();
+        assert.equal(closed, 1);
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0][0], "mcp-request");
+      }
     }
     for (const invalid of [source + source, source.replaceAll("mcp-request", "retired-request").replaceAll("accountSwitcher", "retiredSwitcher")]) {
       assert.equal(apply(invalid), invalid);

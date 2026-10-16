@@ -176,7 +176,7 @@ jobs:
             if (result.status !== 0) process.exit(result.status ?? 1);
           }
           NODE
-      - name: Test profile isolation and Computer Use against the signed bundle
+      - name: Test profile isolation, Computer Use and account menu against the signed bundle
         run: |
           set -euo pipefail
           upstream_root="$(mktemp -d)"
@@ -189,7 +189,8 @@ jobs:
             node --test linux-features/community-profile-isolation/test.js
           CODEX_SIGNED_EXTRACTED_APP="$extracted_asar" \
             node --test linux-features/computer-use-linux/unified.test.js \
-              linux-features/computer-use-linux/resume.test.js
+              linux-features/computer-use-linux/resume.test.js \
+              linux-features/account-switcher/test.js
       - name: Require signed renderer dependency regression
         env:
           EXPECTED_SIGNED_VERSION: ${{ inputs.version }}

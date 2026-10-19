@@ -186,6 +186,7 @@ test("update-builder copies staged native feature artifacts without Cargo worksp
   for (const artifact of [
     "codex-computer-use-linux",
     "codex-computer-use-cosmic",
+    "codex-computer-use-indicator",
     "codex-global-dictation-linux",
     "codex-mcp-helper-reaper",
     "codex-read-aloud-linux",
@@ -214,6 +215,45 @@ test("Chronicle-only packaging retains the shared backend for updater rebuilds",
   assert.equal(fs.readFileSync(retainedBackend, "utf8"), "#!/bin/sh\nexit 0\n");
   assert.equal(fs.statSync(retainedBackend).mode & 0o777, 0o755);
 });
+
+for (const enabled of [[], ["global-dictation"], ["wayland-global-shortcuts"], ["global-dictation", "wayland-global-shortcuts"]]) {
+  test(`shortcut helper packaging and build selection: ${enabled.join(",") || "disabled"}`, (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-shortcuts-package-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const config = path.join(root, "features.json"), builder = path.join(root, "builder");
+    const app = path.join(root, "app"), helper = path.join(app, "resources/native/codex-global-dictation-linux");
+    const binDir = path.join(root, "bin"), cargoLog = path.join(root, "cargo.log");
+    fs.writeFileSync(config, JSON.stringify({enabled}));
+    fs.mkdirSync(path.dirname(helper), {recursive: true});
+    fs.writeFileSync(helper, "#!/bin/sh\nexit 0\n", {mode: 0o755});
+    runPackageCommon(
+      `CODEX_LINUX_FEATURES_CONFIG=${JSON.stringify(config)} stage_enabled_native_feature_artifacts ${JSON.stringify(builder)}\n` +
+      `CODEX_LINUX_FEATURES_CONFIG=${JSON.stringify(config)} stage_update_builder_linux_features_tree ${JSON.stringify(builder)}`,
+      app,
+    );
+    const retained = path.join(builder, "global-dictation-linux/target/release/codex-global-dictation-linux");
+    assert.equal(fs.existsSync(retained), enabled.length > 0);
+    if (enabled.length) assert.equal(fs.statSync(retained).mode & 0o777, 0o755);
+    fs.cpSync(path.join(repoRoot, "scripts/patches"), path.join(builder, "scripts/patches"), {recursive: true});
+    for (const id of ["global-dictation", "wayland-global-shortcuts"]) {
+      const feature = path.join(builder, "linux-features", id);
+      assert.equal(fs.existsSync(feature), enabled.includes(id));
+      if (enabled.includes(id)) assert.equal(require(path.join(feature, "patch.js")).descriptors.length, 1);
+    }
+    fs.mkdirSync(binDir);
+    fs.writeFileSync(path.join(binDir, "cargo"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CARGO_LOG"\n', {mode: 0o755});
+    const result = childProcess.spawnSync("make", ["build-native-feature-helpers"], {
+      cwd: repoRoot, encoding: "utf8", env: {...process.env, CODEX_LINUX_FEATURES_CONFIG: config,
+        CARGO_LOG: cargoLog, PATH: `${binDir}:${process.env.PATH}`},
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const builds = fs.existsSync(cargoLog) ? fs.readFileSync(cargoLog, "utf8").trim().split("\n") : [];
+    assert.equal(builds.length, enabled.length ? 1 : 0);
+    if (builds.length) assert.match(builds[0], /--manifest-path global-dictation-linux\/Cargo.toml/);
+    const common = fs.readFileSync(path.join(repoRoot, "scripts/lib/package-common.sh"), "utf8");
+    assert.match(common, /\n\s+stage-global-shortcuts\.sh \\/);
+  });
+}
 
 test("Chronicle-only native helper setup builds the shared backend", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-native-helper-chronicle-"));

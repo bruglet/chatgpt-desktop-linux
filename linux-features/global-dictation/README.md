@@ -2,6 +2,9 @@
 
 This optional feature enables the global dictation controls already present in the desktop app.
 
+`wayland-global-shortcuts` independently enables Popout, Mini/Pet and the app's
+other global commands. Selecting both features shares one queued portal backend.
+
 X11 uses Electron for shortcut registration and a short-lived modifier-state
 watcher while hold-to-talk is active. Wayland uses the XDG GlobalShortcuts
 portal so both activation and release come from the compositor. The helper does
@@ -49,6 +52,25 @@ Wayland shortcuts must contain at least one modifier and one key. Modifier-only
 shortcuts cannot be represented by the XDG shortcut format and are rejected
 before registration.
 
+The backend uses the application's shortcut registry, including suspension
+during shortcut capture and cancellation of held gestures. Approval requests
+are serialized. Partial approval affects the corresponding actions; a failed
+reconfiguration attempts one recovery of still-requested working actions.
+Startup binds after account-access discovery. Once application quit is accepted,
+the backend stops before windows and action owners are disposed, preserving KDE's
+saved choices across ordinary restarts and update exits.
+Session replacement can briefly interrupt global shortcuts. The helper's
+registration timeout is 30 seconds.
+
+The compositor controls the actual global bindings. On KDE, edit saved bindings
+under **System Settings > Keyboard > Shortcuts > ChatGPT Community**. A preferred
+combination changed in the app may leave the saved system binding unchanged.
+The helper tracks the portal's binding descriptions and subsequent changes.
+Escape cancellation uses the application's Electron path; global Escape delivery
+on native Wayland is outside this feature's modifier-plus-key portal support.
+
 ```bash
 node --test linux-features/global-dictation/test.js
+node --test scripts/patches/lib/global-shortcuts-portal.test.js
+cargo test --manifest-path global-dictation-linux/Cargo.toml
 ```

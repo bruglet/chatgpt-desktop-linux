@@ -980,6 +980,7 @@ stage_update_builder_bundle() {
         patch-report.js \
         patch-validation.js \
         process-detection.sh \
+        stage-global-shortcuts.sh \
         upstream-linux-package.js \
         upstream-linux-package.sh; do
         cp "$REPO_DIR/scripts/lib/$relative" "$update_builder_root/scripts/lib/$relative"
@@ -1024,8 +1025,12 @@ stage_enabled_native_feature_artifacts() {
                     "$APP_DIR/resources/plugins/openai-bundled/plugins/unified-computer-use/bin/codex-computer-use-cosmic" \
                     "$update_builder_root/target/release/codex-computer-use-cosmic" \
                     "$feature_id COSMIC helper"
+                stage_update_builder_native_artifact \
+                    "$APP_DIR/resources/plugins/openai-bundled/plugins/unified-computer-use/bin/codex-computer-use-indicator" \
+                    "$update_builder_root/target/release/codex-computer-use-indicator" \
+                    "$feature_id activity indicator"
                 ;;
-            global-dictation)
+            global-dictation|wayland-global-shortcuts)
                 stage_update_builder_native_artifact \
                     "$APP_DIR/resources/native/codex-global-dictation-linux" \
                     "$update_builder_root/global-dictation-linux/target/release/codex-global-dictation-linux" \

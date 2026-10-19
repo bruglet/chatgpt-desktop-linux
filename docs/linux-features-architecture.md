@@ -118,6 +118,13 @@ as `feature:<feature-id>:<descriptor-id>`. Supported phases are
 `extracted-app:post-webview`. Descriptors must be idempotent and fail softly
 unless the feature deliberately declares a required acceptance surface.
 
+Features may share ordinary patch libraries in `scripts/patches/lib/`. For
+example, `global-dictation` and `wayland-global-shortcuts` each install an
+idempotent portal backend from that directory and select their own command IDs.
+Either feature stages the same prebuilt helper through its staging hook. The
+update-builder carries the shared patch libraries and staging utility together
+with the selected feature directories.
+
 The core registry contains only required compatibility patches. Features must
 be self-contained and must not compose with deleted core IDs. A generic core extension point may be
 added only when unavoidable and must remain feature-agnostic.

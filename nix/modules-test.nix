@@ -127,6 +127,12 @@ assert lib.assertMsg
   (features.normalize [ "record-and-replay" ] == [ "chronicle-skysight" "record-and-replay" ])
   "Nix feature dependencies were not added to an existing direct selection";
 assert lib.assertMsg
+  (features.normalize [ "global-dictation" ] == [ "global-dictation" ])
+  "dictation must remain independently selectable";
+assert lib.assertMsg
+  (features.normalize [ "wayland-global-shortcuts" ] == [ "wayland-global-shortcuts" ])
+  "Wayland shortcuts must remain independently selectable";
+assert lib.assertMsg
   (features.normalize [ "codex-wrapper-updater" "zed-opener" ] == [ ])
   "known retired and aliased-retired feature IDs were not ignored";
 assert lib.assertMsg

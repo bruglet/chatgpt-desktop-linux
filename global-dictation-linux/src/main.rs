@@ -24,7 +24,6 @@ const GNOME_PATH: &str = "/org/chatgpt/Community/Dictation";
 const GNOME_INTERFACE: &str = "org.chatgpt.Community.Dictation1";
 const GNOME_TIMEOUT: Duration = Duration::from_secs(2);
 const GNOME_GUIDANCE: &str = "Enable the ChatGPT Community dictation GNOME extension (compatible version 1) and try again; RemoteDesktop fallback is disabled";
-const SHORTCUT_ID: &str = "global-dictation";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEVICE_KEYBOARD: u32 = 1;
 const KEY_RELEASED: u32 = 0;
@@ -40,6 +39,8 @@ enum PasteBackend {
 }
 
 async fn register_host_app_id(connection: &Connection, app_id: &str) -> Result<()> {
+    // Owl rewrites CHROME_DESKTOP; the wrapper keeps its installed identity here.
+    let app_id = std::env::var("CODEX_LINUX_APP_ID").unwrap_or_else(|_| app_id.to_owned());
     let registry_proxy = Proxy::new(
         connection,
         "org.freedesktop.portal.Desktop",
@@ -58,6 +59,13 @@ async fn register_host_app_id(connection: &Connection, app_id: &str) -> Result<(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct Shortcut {
+    id: String,
+    description: String,
+    trigger: String,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     if let Err(error) = run().await {
@@ -67,41 +75,77 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let accelerator = parse_args(std::env::args().skip(1))?;
-    let trigger = portal_trigger(&accelerator)?;
-    run_portal(&trigger).await
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let check = args.first().is_some_and(|command| command == "check");
+    let shortcuts = parse_args(args)?;
+    if check {
+        for shortcut in shortcuts {
+            emit(&shortcut.trigger)?;
+        }
+        return Ok(());
+    }
+    run_portal(&shortcuts).await
 }
 
-fn parse_args(args: impl IntoIterator<Item = String>) -> Result<String> {
+fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Vec<Shortcut>> {
     let mut args = args.into_iter();
     let Some(command) = args.next() else {
-        bail!("usage: codex-global-dictation-linux portal --accelerator <shortcut>");
+        bail!("usage: codex-global-dictation-linux <portal|check> --shortcut <id> <description> <accelerator>");
     };
-    if command != "portal" {
+    if command != "portal" && command != "check" {
         bail!("unknown command: {command}");
     }
 
-    let mut accelerator = None;
+    let mut shortcuts: Vec<Shortcut> = Vec::new();
     while let Some(argument) = args.next() {
-        match argument.as_str() {
-            "--accelerator" => {
-                let value = args.next().context("missing --accelerator value")?;
-                if accelerator.replace(value).is_some() {
-                    bail!("--accelerator may only be provided once");
-                }
-            }
-            _ => bail!("unknown argument: {argument}"),
+        if argument != "--shortcut" {
+            bail!("unknown argument: {argument}");
         }
+        if shortcuts.len() == 32 {
+            bail!("provide between 1 and 32 --shortcut arguments");
+        }
+        let id = args.next().context("missing shortcut id")?;
+        let description = args.next().context("missing shortcut description")?;
+        let accelerator = args.next().context("missing shortcut accelerator")?;
+        if id.is_empty()
+            || id.len() > 128
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        {
+            bail!(
+                "shortcut id must contain 1 to 128 letters, digits, dots, underscores or hyphens"
+            );
+        }
+        if description.trim().is_empty()
+            || description.len() > 512
+            || description.chars().any(char::is_control)
+        {
+            bail!("shortcut description must contain 1 to 512 printable bytes");
+        }
+        if accelerator.is_empty()
+            || accelerator.len() > 128
+            || accelerator.chars().any(char::is_control)
+        {
+            bail!("accelerator must contain between 1 and 128 printable characters");
+        }
+        let trigger = portal_trigger(&accelerator)?;
+        if shortcuts
+            .iter()
+            .any(|shortcut| shortcut.id == id || shortcut.trigger == trigger)
+        {
+            bail!("global shortcuts must have distinct command ids and triggers");
+        }
+        shortcuts.push(Shortcut {
+            id,
+            description,
+            trigger,
+        });
     }
-
-    let accelerator = accelerator.context("missing --accelerator")?;
-    if accelerator.is_empty()
-        || accelerator.len() > 128
-        || accelerator.chars().any(char::is_control)
-    {
-        bail!("accelerator must contain between 1 and 128 printable characters");
+    if shortcuts.is_empty() {
+        bail!("provide between 1 and 32 --shortcut arguments");
     }
-    Ok(accelerator)
+    Ok(shortcuts)
 }
 
 fn portal_trigger(accelerator: &str) -> Result<String> {
@@ -136,6 +180,7 @@ fn portal_trigger(accelerator: &str) -> Result<String> {
     if modifiers.is_empty() {
         bail!("shortcut must include at least one modifier");
     }
+    modifiers.sort_unstable();
     modifiers.push(&key);
     Ok(modifiers.join("+"))
 }
@@ -235,14 +280,14 @@ fn portal_key(key: &str) -> Result<String> {
     Ok(mapped.to_string())
 }
 
-async fn run_portal(trigger: &str) -> Result<()> {
+async fn run_portal(shortcuts: &[Shortcut]) -> Result<()> {
     let connection = Connection::session()
         .await
         .context("failed to connect to the session bus")?;
-    run_portal_on(&connection, trigger).await
+    run_portal_on(&connection, shortcuts).await
 }
 
-async fn run_portal_on(connection: &Connection, trigger: &str) -> Result<()> {
+async fn run_portal_on(connection: &Connection, shortcuts: &[Shortcut]) -> Result<()> {
     let proxy = Proxy::new(connection, PORTAL_SERVICE, PORTAL_PATH, SHORTCUTS_INTERFACE)
         .await
         .context("GlobalShortcuts portal is unavailable")?;
@@ -255,39 +300,53 @@ async fn run_portal_on(connection: &Connection, trigger: &str) -> Result<()> {
     }
 
     let session = create_session(connection, &proxy).await?;
-    if let Err(error) = bind_shortcut(connection, &proxy, &session, trigger).await {
-        close_session(connection, &session).await;
-        return Err(error);
-    }
-
-    let mut activated = proxy
-        .receive_signal("Activated")
+    let mut signals = proxy
+        .receive_all_signals()
         .await
-        .context("failed to subscribe to shortcut activation")?;
-    let mut deactivated = proxy
-        .receive_signal("Deactivated")
-        .await
-        .context("failed to subscribe to shortcut deactivation")?;
+        .context("failed to subscribe to global shortcut events")?;
+    let bound = tokio::select! {
+        result = bind_shortcuts(connection, &proxy, &session, shortcuts) => result,
+        _ = tokio::signal::ctrl_c() => return close_session_checked(connection, &session).await,
+    };
+    let bound = match bound {
+        Ok(bound) => bound,
+        Err(error) => {
+            close_session(connection, &session).await;
+            return Err(error);
+        }
+    };
 
-    let backend = detect_paste_backend(connection).await;
-    emit("ready")?;
-    let mut pressed = false;
+    let backend = tokio::select! {
+        backend = detect_paste_backend(connection) => backend,
+        _ = tokio::signal::ctrl_c() => return close_session_checked(connection, &session).await,
+    };
+    let mut pressed = vec![false; shortcuts.len()];
+    emit_bindings(shortcuts, &bound, &mut pressed)?;
     let mut commands = BufReader::new(tokio::io::stdin()).lines();
     let mut paste_session = None;
     loop {
         tokio::select! {
-            message = activated.next() => {
-                let message = message.context("shortcut activation stream ended")?;
-                if signal_matches(&message, &session)? && !pressed {
-                    pressed = true;
-                    emit("down")?;
-                }
-            }
-            message = deactivated.next() => {
-                let message = message.context("shortcut deactivation stream ended")?;
-                if signal_matches(&message, &session)? && pressed {
-                    pressed = false;
-                    emit("up")?;
+            message = signals.next() => {
+                let message = message.context("global shortcut event stream ended")?;
+                let header = message.header();
+                match header.member().map(|member| member.as_str()) {
+                    Some("Activated" | "Deactivated") => {
+                        let down = header.member().is_some_and(|member| member.as_str() == "Activated");
+                        for (index, shortcut) in shortcuts.iter().enumerate() {
+                            if signal_matches(&message, &session, &shortcut.id)? && pressed[index] != down {
+                                pressed[index] = down;
+                                emit_shortcut(if down { "down" } else { "up" }, index, shortcuts.len())?;
+                            }
+                        }
+                    }
+                    Some("ShortcutsChanged") => {
+                        let (signal_session, bound): (OwnedObjectPath, BoundShortcuts) = message
+                            .body().deserialize().context("failed to decode shortcut changes")?;
+                        if signal_session == session {
+                            emit_bindings(shortcuts, &bound, &mut pressed)?;
+                        }
+                    }
+                    _ => {}
                 }
             }
             command = commands.next_line() => {
@@ -315,8 +374,7 @@ async fn run_portal_on(connection: &Connection, trigger: &str) -> Result<()> {
     if let Some(session) = paste_session {
         close_session(connection, &session).await;
     }
-    close_session(connection, &session).await;
-    Ok(())
+    close_session_checked(connection, &session).await
 }
 
 async fn detect_paste_backend(connection: &Connection) -> PasteBackend {
@@ -572,18 +630,25 @@ async fn create_session(connection: &Connection, proxy: &Proxy<'_>) -> Result<Ow
     OwnedObjectPath::try_from(session_handle).context("session_handle was not a valid object path")
 }
 
-async fn bind_shortcut(
+type BoundShortcuts = Vec<(String, HashMap<String, OwnedValue>)>;
+
+async fn bind_shortcuts(
     connection: &Connection,
     proxy: &Proxy<'_>,
     session: &OwnedObjectPath,
-    trigger: &str,
-) -> Result<()> {
+    shortcuts: &[Shortcut],
+) -> Result<BoundShortcuts> {
     let (request_path, mut response_stream) =
         portal_request_stream(connection, "dictation_bind").await?;
-    let mut properties: HashMap<&str, Value<'_>> = HashMap::new();
-    properties.insert("description", Value::from("Global dictation"));
-    properties.insert("preferred_trigger", Value::from(trigger));
-    let shortcuts = vec![(SHORTCUT_ID, properties)];
+    let portal_shortcuts = shortcuts
+        .iter()
+        .map(|shortcut| {
+            let mut properties: HashMap<&str, Value<'_>> = HashMap::new();
+            properties.insert("description", Value::from(shortcut.description.as_str()));
+            properties.insert("preferred_trigger", Value::from(shortcut.trigger.as_str()));
+            (shortcut.id.as_str(), properties)
+        })
+        .collect::<Vec<_>>();
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert(
         "handle_token",
@@ -591,7 +656,7 @@ async fn bind_shortcut(
     );
 
     let handle: OwnedObjectPath = proxy
-        .call("BindShortcuts", &(session, shortcuts, "", options))
+        .call("BindShortcuts", &(session, portal_shortcuts, "", options))
         .await
         .context("GlobalShortcuts BindShortcuts failed")?;
     let (response_code, results) =
@@ -599,20 +664,74 @@ async fn bind_shortcut(
     if response_code != 0 {
         bail!("Global shortcut was denied or cancelled with response code {response_code}");
     }
-    let bound: Vec<(String, HashMap<String, OwnedValue>)> = results
+    let bound: BoundShortcuts = results
         .get("shortcuts")
         .context("BindShortcuts response did not include shortcuts")?
         .try_clone()
         .context("failed to clone bound shortcuts")?
         .try_into()
         .context("bound shortcuts had an unexpected type")?;
-    if !bound.iter().any(|(id, _)| id == SHORTCUT_ID) {
-        bail!("Global shortcut was not accepted by the portal");
+    Ok(bound)
+}
+
+fn binding_lines(
+    shortcuts: &[Shortcut],
+    bound: &BoundShortcuts,
+    pressed: &mut [bool],
+) -> Result<Vec<String>> {
+    debug_assert_eq!(shortcuts.len(), pressed.len());
+    if bound.len() > shortcuts.len()
+        || bound.iter().enumerate().any(|(index, (id, _))| {
+            !shortcuts.iter().any(|shortcut| shortcut.id == *id)
+                || bound[..index].iter().any(|(previous, _)| previous == id)
+        })
+    {
+        bail!("portal returned unknown or duplicate shortcut identities");
+    }
+    let mut lines = vec!["bindings".to_string()];
+    for (index, shortcut) in shortcuts.iter().enumerate() {
+        let Some((_, properties)) = bound.iter().find(|(id, _)| *id == shortcut.id) else {
+            pressed[index] = false;
+            continue;
+        };
+        let description = properties
+            .get("trigger_description")
+            .map(<&str>::try_from)
+            .transpose()
+            .context("invalid trigger description")?;
+        // KDE retains declined actions with an explicitly empty trigger.
+        if description == Some("") {
+            pressed[index] = false;
+            continue;
+        }
+        let description: String = description
+            .unwrap_or_default()
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(512)
+            .collect();
+        lines.push(format!("bound:{index}:{description}"));
+    }
+    lines.push("ready".to_string());
+    Ok(lines)
+}
+
+fn emit_bindings(
+    shortcuts: &[Shortcut],
+    bound: &BoundShortcuts,
+    pressed: &mut [bool],
+) -> Result<()> {
+    for line in binding_lines(shortcuts, bound, pressed)? {
+        emit(&line)?;
     }
     Ok(())
 }
 
-fn signal_matches(message: &zbus::Message, session: &OwnedObjectPath) -> Result<bool> {
+fn signal_matches(
+    message: &zbus::Message,
+    session: &OwnedObjectPath,
+    expected_id: &str,
+) -> Result<bool> {
     let (signal_session, shortcut_id, _timestamp, _options): (
         OwnedObjectPath,
         String,
@@ -622,20 +741,26 @@ fn signal_matches(message: &zbus::Message, session: &OwnedObjectPath) -> Result<
         .body()
         .deserialize()
         .context("failed to decode global shortcut signal")?;
-    Ok(signal_session == *session && shortcut_id == SHORTCUT_ID)
+    Ok(signal_session == *session && shortcut_id == expected_id)
 }
 
 async fn close_session(connection: &Connection, session: &OwnedObjectPath) {
-    if let Ok(proxy) = Proxy::new(
+    let _ = close_session_checked(connection, session).await;
+}
+
+async fn close_session_checked(connection: &Connection, session: &OwnedObjectPath) -> Result<()> {
+    let proxy = Proxy::new(
         connection,
         PORTAL_SERVICE,
         session.as_str(),
         "org.freedesktop.portal.Session",
     )
     .await
-    {
-        let _: Result<(), _> = proxy.call("Close", &()).await;
-    }
+    .context("failed to open portal session for cleanup")?;
+    proxy
+        .call::<_, _, ()>("Close", &())
+        .await
+        .context("failed to close portal session")
 }
 
 async fn portal_request_stream<'a>(
@@ -723,6 +848,14 @@ fn emit_error(event: &str, error: &anyhow::Error) -> Result<()> {
     emit(&format!("{event}:{message}"))
 }
 
+fn emit_shortcut(event: &str, index: usize, count: usize) -> Result<()> {
+    if count == 1 {
+        emit(event)
+    } else {
+        emit(&format!("{event}:{index}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -742,13 +875,14 @@ mod tests {
     };
 
     use super::{
-        bind_shortcut, create_session, detect_paste_backend, parse_args, paste_with_backend,
+        bind_shortcuts, create_session, detect_paste_backend, parse_args, paste_with_backend,
         portal_key, portal_trigger, probe_gnome_companion, request_path, signal_matches,
-        PasteBackend, DEVICE_KEYBOARD, GNOME_GUIDANCE, GNOME_PATH, GNOME_SERVICE, GNOME_TIMEOUT,
-        KEYSYM_CONTROL_L, KEYSYM_V, KEY_PRESSED, KEY_RELEASED, PORTAL_PATH, PORTAL_SERVICE,
-        REQUEST_INTERFACE, SHORTCUTS_INTERFACE, SHORTCUT_ID,
+        PasteBackend, Shortcut, DEVICE_KEYBOARD, GNOME_GUIDANCE, GNOME_PATH, GNOME_SERVICE,
+        GNOME_TIMEOUT, KEYSYM_CONTROL_L, KEYSYM_V, KEY_PRESSED, KEY_RELEASED, PORTAL_PATH,
+        PORTAL_SERVICE, REQUEST_INTERFACE, SHORTCUTS_INTERFACE,
     };
 
+    const SHORTCUT_ID: &str = "globalDictationHold";
     const TEST_SESSION: &str = "/org/freedesktop/portal/desktop/session/test/global_dictation";
     const TEST_PASTE_SESSION: &str = "/org/freedesktop/portal/desktop/session/test/paste";
 
@@ -835,13 +969,29 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct FakeHostRegistry {
+        app_ids: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.host.portal.Registry")]
+    impl FakeHostRegistry {
+        fn register(&self, app_id: String, _options: HashMap<String, OwnedValue>) {
+            self.app_ids.lock().unwrap().push(app_id);
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct FakePortal {
         trigger: Arc<Mutex<Option<String>>>,
+        ids: Arc<Mutex<Vec<String>>>,
+        description: Arc<Mutex<Option<String>>>,
+        accepted: Option<Vec<String>>,
+        delay_bind: bool,
     }
 
     #[zbus::interface(name = "org.freedesktop.portal.GlobalShortcuts")]
     impl FakePortal {
-        #[zbus(property)]
+        #[zbus(property, name = "version")]
         fn version(&self) -> u32 {
             2
         }
@@ -895,23 +1045,49 @@ mod tests {
                     zbus::fdo::Error::InvalidArgs(error.to_string())
                 })?;
             *self.trigger.lock().unwrap() = Some(trigger);
+            let description: String = properties
+                .get("description")
+                .ok_or_else(|| zbus::fdo::Error::InvalidArgs("missing description".to_string()))?
+                .try_clone()
+                .map_err(|error| zbus::fdo::Error::InvalidArgs(error.to_string()))?
+                .try_into()
+                .map_err(|error: zbus::zvariant::Error| {
+                    zbus::fdo::Error::InvalidArgs(error.to_string())
+                })?;
+            *self.description.lock().unwrap() = Some(description);
 
             let handle = request_handle(&header, &options)?;
-            let mut returned_properties = HashMap::new();
-            returned_properties.insert(
-                "description".to_string(),
-                OwnedValue::try_from(zbus::zvariant::Value::from("Global dictation"))
-                    .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?,
-            );
-            let bound = vec![(SHORTCUT_ID.to_string(), returned_properties)];
+            *self.ids.lock().unwrap() = shortcuts.iter().map(|(id, _)| id.clone()).collect();
+            let bound: Vec<_> = shortcuts
+                .into_iter()
+                .filter(|(id, _)| {
+                    self.accepted
+                        .as_ref()
+                        .is_none_or(|accepted| accepted.contains(id))
+                })
+                .collect();
             let mut results = HashMap::new();
             results.insert(
                 "shortcuts".to_string(),
                 OwnedValue::try_from(zbus::zvariant::Value::from(bound))
                     .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?,
             );
-            emit_response(connection, &handle, 0, results).await?;
+            if !self.delay_bind {
+                emit_response(connection, &handle, 0, results).await?;
+            }
             Ok(handle)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct FakeShortcutsSession {
+        closed: Arc<Mutex<bool>>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.portal.Session")]
+    impl FakeShortcutsSession {
+        fn close(&self) {
+            *self.closed.lock().unwrap() = true;
         }
     }
 
@@ -1151,6 +1327,112 @@ mod tests {
         assert_eq!(portal_trigger("Ctrl+Numlock").unwrap(), "CTRL+Num_Lock");
         assert_eq!(portal_trigger("Ctrl+Plus").unwrap(), "CTRL+plus");
         assert_eq!(portal_trigger("Ctrl+num7").unwrap(), "CTRL+KP_7");
+        assert_eq!(
+            portal_trigger("Alt+Control+G").unwrap(),
+            portal_trigger("Ctrl+Alt+G").unwrap()
+        );
+        assert_eq!(
+            portal_trigger("Shift+Ctrl+Alt+Shift+G").unwrap(),
+            "ALT+CTRL+SHIFT+g"
+        );
+    }
+
+    #[test]
+    fn validation_mode_reuses_the_portal_parser() {
+        let portal = parse_args(
+            ["portal", "--shortcut", "hotkeyWindow", "Popout", "Ctrl+G"].map(str::to_string),
+        )
+        .unwrap();
+        let check = parse_args(
+            ["check", "--shortcut", "hotkeyWindow", "Popout", "Ctrl+G"].map(str::to_string),
+        )
+        .unwrap();
+        assert_eq!(portal, check);
+        assert!(parse_args(
+            [
+                "check",
+                "--shortcut",
+                "hotkeyWindow",
+                "Popout",
+                "Ctrl+Unsupported"
+            ]
+            .map(str::to_string)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn reports_partial_disabled_and_changed_bindings_by_identity() {
+        let shortcuts = parse_args(
+            [
+                "portal",
+                "--shortcut",
+                "hotkeyWindow",
+                "Popout",
+                "Ctrl+G",
+                "--shortcut",
+                "openAvatarOverlay",
+                "Mini",
+                "Super+P",
+            ]
+            .map(str::to_string),
+        )
+        .unwrap();
+        let properties = |description: &str| {
+            HashMap::from([(
+                "trigger_description".to_string(),
+                OwnedValue::try_from(zbus::zvariant::Value::from(description)).unwrap(),
+            )])
+        };
+        assert_eq!(
+            super::binding_lines(&shortcuts, &vec![], &mut [false, false]).unwrap(),
+            ["bindings", "ready"]
+        );
+        let mut pressed = [true, true];
+        assert_eq!(
+            super::binding_lines(
+                &shortcuts,
+                &vec![
+                    ("hotkeyWindow".into(), properties("Meta+G\n")),
+                    ("openAvatarOverlay".into(), properties("")),
+                ],
+                &mut pressed
+            )
+            .unwrap(),
+            ["bindings", "bound:0:Meta+G", "ready"]
+        );
+        assert_eq!(pressed, [true, false]);
+        assert!(super::binding_lines(
+            &shortcuts,
+            &vec![("unknown".into(), properties("Ctrl+G"))],
+            &mut [false, false]
+        )
+        .is_err());
+        assert!(super::binding_lines(
+            &shortcuts,
+            &vec![
+                ("hotkeyWindow".into(), properties("Ctrl+G")),
+                ("hotkeyWindow".into(), properties("Ctrl+H"))
+            ],
+            &mut [false, false]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn command_identity_survives_keybinding_and_description_changes() {
+        let parse = |label, accelerator| {
+            parse_args(
+                ["portal", "--shortcut", "hotkeyWindow", label, accelerator].map(str::to_string),
+            )
+            .unwrap()
+            .remove(0)
+        };
+        let original = parse("Open popout chat window", "Ctrl+Alt+G");
+        let changed = parse("Открыть всплывающее окно чата", "Ctrl+Alt+H");
+        assert_eq!(original.id, changed.id);
+        assert_ne!(original.trigger, changed.trigger);
+        assert_ne!(original.description, changed.description);
     }
 
     #[test]
@@ -1165,13 +1447,79 @@ mod tests {
     #[test]
     fn validates_cli_shape_and_size() {
         assert_eq!(
-            parse_args(["portal", "--accelerator", "Ctrl+Space"].map(str::to_string)).unwrap(),
-            "Ctrl+Space"
+            parse_args(
+                [
+                    "portal",
+                    "--shortcut",
+                    "hotkeyWindow",
+                    "Open popout chat window",
+                    "Ctrl+Space"
+                ]
+                .map(str::to_string)
+            )
+            .unwrap(),
+            [Shortcut {
+                id: "hotkeyWindow".into(),
+                description: "Open popout chat window".into(),
+                trigger: "CTRL+space".into()
+            }]
         );
-        assert!(parse_args(["portal", "--accelerator"].map(str::to_string)).is_err());
-        assert!(
-            parse_args(["portal", "--accelerator", &"x".repeat(129)].map(str::to_string)).is_err()
+        assert!(parse_args(["portal", "--shortcut"].map(str::to_string)).is_err());
+        assert_eq!(
+            parse_args(
+                [
+                    "portal",
+                    "--shortcut",
+                    "hotkeyWindow",
+                    "Open popout chat window",
+                    "Ctrl+Alt+G",
+                    "--shortcut",
+                    "openAvatarOverlay",
+                    "Show Mini / Pet",
+                    "Super+Alt+P"
+                ]
+                .map(str::to_string)
+            )
+            .unwrap()
+            .len(),
+            2
         );
+        for (id, label, key) in [
+            ("", "Show Mini", "Super+Alt+P"),
+            ("bad id", "Show Mini", "Super+Alt+P"),
+            ("openAvatarOverlay", "", "Super+Alt+P"),
+            ("openAvatarOverlay", "Show\nMini", "Super+Alt+P"),
+            ("openAvatarOverlay", "Show Mini", ""),
+            ("openAvatarOverlay", "Show Mini", "Escape"),
+            (&"x".repeat(129), "Show Mini", "Super+Alt+P"),
+            ("openAvatarOverlay", &"x".repeat(513), "Super+Alt+P"),
+            ("openAvatarOverlay", "Show Mini", &"x".repeat(129)),
+        ] {
+            assert!(
+                parse_args(["portal", "--shortcut", id, label, key].map(str::to_string)).is_err()
+            );
+        }
+        for (id, key) in [
+            ("hotkeyWindow", "Ctrl+Alt+H"),
+            ("openAvatarOverlay", "Ctrl+Alt+G"),
+            ("openAvatarOverlay", "Alt+Control+G"),
+        ] {
+            assert!(parse_args(
+                [
+                    "portal",
+                    "--shortcut",
+                    "hotkeyWindow",
+                    "Popout",
+                    "Ctrl+Alt+G",
+                    "--shortcut",
+                    id,
+                    "Other action",
+                    key
+                ]
+                .map(str::to_string)
+            )
+            .is_err());
+        }
     }
 
     #[test]
@@ -1192,10 +1540,139 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn portal_helper_subprocess() {
+        let Ok(address) = std::env::var("CODEX_TEST_SHORTCUTS_BUS") else {
+            return;
+        };
+        let client = Builder::address(address.as_str())
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        let shortcuts = parse_args(
+            ["portal", "--shortcut", SHORTCUT_ID, "Dictation", "Ctrl+G"].map(str::to_string),
+        )
+        .unwrap();
+        super::run_portal_on(&client, &shortcuts).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancellation_closes_a_session_while_consent_is_pending() {
+        let bus = TestBus::start();
+        let registry = FakeHostRegistry::default();
+        let app_ids = registry.app_ids.clone();
+        let portal = FakePortal {
+            delay_bind: true,
+            ..FakePortal::default()
+        };
+        let bound = portal.ids.clone();
+        let session = FakeShortcutsSession::default();
+        let closed = session.closed.clone();
+        let _server = Builder::address(bus.address.as_str())
+            .unwrap()
+            .name(PORTAL_SERVICE)
+            .unwrap()
+            .serve_at(PORTAL_PATH, portal)
+            .unwrap()
+            .serve_at(PORTAL_PATH, registry)
+            .unwrap()
+            .serve_at(TEST_SESSION, session)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        // Isolate SIGINT from the test runner while exercising the real helper loop.
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::portal_helper_subprocess", "--nocapture"])
+            .env("CODEX_TEST_SHORTCUTS_BUS", &bus.address)
+            .env("CODEX_LINUX_APP_ID", "codex-desktop")
+            .env("CHROME_DESKTOP", "chatgpt.desktop")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            while bound.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            assert!(Command::new("kill")
+                .args(["-INT", &child.id().to_string()])
+                .status()
+                .unwrap()
+                .success());
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        if result.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(result
+            .expect("helper did not acknowledge session closure")
+            .success());
+        assert!(*closed.lock().unwrap());
+        assert_eq!(*app_ids.lock().unwrap(), ["codex-desktop"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accepts_partial_portal_approval() {
+        let bus = TestBus::start();
+        let portal = FakePortal {
+            accepted: Some(vec![SHORTCUT_ID.into()]),
+            ..FakePortal::default()
+        };
+        let _server = Builder::address(bus.address.as_str())
+            .unwrap()
+            .name(PORTAL_SERVICE)
+            .unwrap()
+            .serve_at(PORTAL_PATH, portal)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        let client = bus_client(&bus).await;
+        let proxy = zbus::Proxy::new(&client, PORTAL_SERVICE, PORTAL_PATH, SHORTCUTS_INTERFACE)
+            .await
+            .unwrap();
+        let session = create_session(&client, &proxy).await.unwrap();
+        let shortcuts = parse_args(
+            [
+                "portal",
+                "--shortcut",
+                SHORTCUT_ID,
+                "Dictation",
+                "Ctrl+G",
+                "--shortcut",
+                "hotkeyWindow",
+                "Popout",
+                "Ctrl+H",
+            ]
+            .map(str::to_string),
+        )
+        .unwrap();
+        let bound = bind_shortcuts(&client, &proxy, &session, &shortcuts)
+            .await
+            .unwrap();
+        assert_eq!(bound.len(), 1);
+        assert_eq!(
+            super::binding_lines(&shortcuts, &bound, &mut [false, false]).unwrap(),
+            ["bindings", "bound:0:", "ready"]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn registers_and_receives_press_and_release_through_the_portal() {
         let bus = TestBus::start();
         let portal = FakePortal::default();
         let observed_trigger = portal.trigger.clone();
+        let observed_ids = portal.ids.clone();
+        let observed_description = portal.description.clone();
         let server = Builder::address(bus.address.as_str())
             .unwrap()
             .name(PORTAL_SERVICE)
@@ -1215,16 +1692,39 @@ mod tests {
             .unwrap();
 
         let session = create_session(&client, &proxy).await.unwrap();
-        bind_shortcut(&client, &proxy, &session, "CTRL+SHIFT+space")
-            .await
-            .unwrap();
+        bind_shortcuts(
+            &client,
+            &proxy,
+            &session,
+            &[
+                Shortcut {
+                    id: SHORTCUT_ID.into(),
+                    description: "Dictation: hold to talk".into(),
+                    trigger: "CTRL+SHIFT+space".into(),
+                },
+                Shortcut {
+                    id: "openAvatarOverlay".into(),
+                    description: "Показать Mini / Pet".into(),
+                    trigger: "LOGO+ALT+p".into(),
+                },
+            ],
+        )
+        .await
+        .unwrap();
         assert_eq!(
             observed_trigger.lock().unwrap().as_deref(),
             Some("CTRL+SHIFT+space")
         );
+        assert_eq!(
+            *observed_ids.lock().unwrap(),
+            [SHORTCUT_ID, "openAvatarOverlay"]
+        );
+        assert_eq!(
+            observed_description.lock().unwrap().as_deref(),
+            Some("Dictation: hold to talk")
+        );
 
-        let mut activated = proxy.receive_signal("Activated").await.unwrap();
-        let mut deactivated = proxy.receive_signal("Deactivated").await.unwrap();
+        let mut signals = proxy.receive_all_signals().await.unwrap();
         let empty: HashMap<String, OwnedValue> = HashMap::new();
         server
             .emit_signal(
@@ -1247,16 +1747,19 @@ mod tests {
             .await
             .unwrap();
 
-        let down = tokio::time::timeout(Duration::from_secs(1), activated.next())
+        let down = tokio::time::timeout(Duration::from_secs(1), signals.next())
             .await
             .unwrap()
             .unwrap();
-        let up = tokio::time::timeout(Duration::from_secs(1), deactivated.next())
+        let up = tokio::time::timeout(Duration::from_secs(1), signals.next())
             .await
             .unwrap()
             .unwrap();
-        assert!(signal_matches(&down, &session).unwrap());
-        assert!(signal_matches(&up, &session).unwrap());
+        assert!(signal_matches(&down, &session, SHORTCUT_ID).unwrap());
+        assert!(signal_matches(&up, &session, SHORTCUT_ID).unwrap());
+        assert_eq!(down.header().member().unwrap().as_str(), "Activated");
+        assert_eq!(up.header().member().unwrap().as_str(), "Deactivated");
+        assert!(!signal_matches(&down, &session, "hotkeyWindow").unwrap());
     }
 
     #[tokio::test(flavor = "current_thread")]

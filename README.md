@@ -277,6 +277,7 @@ requirements, known limitations, configuration, and tests.
 | `flatpak-chrome-native-messaging` | Bridge the official Chrome extension into Flatpak Google Chrome | [Docs](linux-features/flatpak-chrome-native-messaging/README.md) |
 | `frameless-titlebar` | Hide official Linux overlay buttons for compositor-managed decorations | [Docs](linux-features/frameless-titlebar/README.md) |
 | `global-dictation` | X11 and XDG portal global dictation hotkeys | [Docs](linux-features/global-dictation/README.md) |
+| `wayland-global-shortcuts` | Native Wayland support for the app's Popout, Mini/Pet and other global shortcuts; independent of dictation | [Docs](linux-features/wayland-global-shortcuts/README.md) |
 | `global-dictation-gnome` | Optional GNOME Shell paste companion without RemoteDesktop sessions; requires `global-dictation` and explicit extension activation | [Docs](linux-features/global-dictation-gnome/README.md) |
 | `linux-performance-workarounds` | Measured renderer workarounds for affected systems | [Docs](linux-features/linux-performance-workarounds/README.md) |
 | `mcp-helper-reaper` | Reap orphaned MCP helpers without touching live sessions | [Docs](linux-features/mcp-helper-reaper/README.md) |

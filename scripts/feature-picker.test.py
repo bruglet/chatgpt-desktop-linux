@@ -18,6 +18,32 @@ SPEC.loader.exec_module(feature_picker)
 
 
 class FeaturePickerModelTests(unittest.TestCase):
+    def test_global_shortcut_features_are_independent_and_leave_no_derived_selection(self):
+        features = feature_picker.discover_features(REPO_ROOT / "linux-features")
+        for feature_id in ("global-dictation", "wayland-global-shortcuts"):
+            with self.subTest(feature=feature_id):
+                model = feature_picker.SelectionModel(features)
+                model.enable(feature_id)
+                self.assertEqual(model.ordered_selected(), [feature_id])
+                model.disable(feature_id)
+                self.assertEqual(model.ordered_selected(), [])
+
+    def test_cli_disabling_last_shortcut_feature_leaves_empty_selection(self):
+        wizard = (REPO_ROOT / "scripts/bootstrap-wizard.sh").read_text()
+        marker = '"$output_mode" <<\'PY\'\n'
+        embedded = wizard.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        for feature_id in ("global-dictation", "wayland-global-shortcuts"):
+            with self.subTest(feature=feature_id), tempfile.TemporaryDirectory() as temp:
+                config = pathlib.Path(temp) / "features.json"
+                config.write_text(json.dumps({"enabled": [feature_id]}))
+                result = subprocess.run(
+                    [sys.executable, "-", str(REPO_ROOT / "linux-features"), str(config),
+                     "", feature_id, "1", ""], input=embedded, text=True, capture_output=True,
+                    check=True,
+                )
+                self.assertEqual(json.loads(config.read_text())["enabled"], [])
+                self.assertNotIn("not found", result.stderr)
+
     def feature(self, feature_id, *, requires=(), conflicts=()):
         return feature_picker.Feature(
             id=feature_id,

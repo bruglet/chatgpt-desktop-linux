@@ -448,3 +448,174 @@ test("update-builder stages only plugin templates consumed by enabled feature ho
     ["computer-use", "read-aloud"],
   );
 });
+
+const readAloudPluginPath = "resources/plugins/openai-bundled/plugins/read-aloud";
+const readAloudRunnerPaths = ["bin/kokoro-stdin", "bin/kokoro_stdin.py", "install-kokoro-runtime.sh"];
+const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+
+function createReadAloudBuilderFixture(t, enabled, installer = true) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "read-aloud-builder-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, "source");
+  for (const relative of [
+    "install.sh", "launcher", "scripts/lib", "scripts/patches", "scripts/patch-linux-window-ui.js",
+    "scripts/build-deb.sh", "scripts/build-rpm.sh", "scripts/build-pacman.sh", "packaging/linux", "assets",
+    "linux-features/read-aloud", "linux-features/read-aloud-mcp",
+    "linux-features/features.example.json", "linux-features/compatibility.json",
+    "plugins/openai-bundled/plugins/read-aloud",
+  ]) {
+    fs.mkdirSync(path.dirname(path.join(source, relative)), { recursive: true });
+    fs.cpSync(path.join(repoRoot, relative), path.join(source, relative), { recursive: true });
+  }
+  if (!installer) fs.unlinkSync(path.join(source, "linux-features/read-aloud/install-kokoro-runtime.sh"));
+  fs.writeFileSync(path.join(source, "linux-features/features.json"), JSON.stringify({ enabled }));
+  const marker = path.join(root, "executed");
+  const inert = `#!/bin/sh\ntouch ${shellQuote(marker)}\nexit 99\n`;
+  const backend = path.join(source, "target/release/codex-read-aloud-linux");
+  fs.mkdirSync(path.dirname(backend), { recursive: true });
+  fs.writeFileSync(backend, inert, { mode: 0o755 });
+  const tools = path.join(root, "tools");
+  fs.mkdirSync(tools);
+  fs.writeFileSync(path.join(tools, "cargo"), inert, { mode: 0o755 });
+  const env = {
+    ...process.env,
+    PATH: `${tools}:${process.env.PATH}`,
+    CODEX_LINUX_FEATURES_ROOT: "",
+    CODEX_LINUX_FEATURES_CONFIG: "",
+    CODEX_LINUX_READ_ALOUD_MCP_SOURCE: "",
+  };
+  const files = new Map(readAloudRunnerPaths.filter((relative) => installer || relative.startsWith("bin/")).map((relative) => {
+    const file = path.join(source, "linux-features/read-aloud", relative);
+    return [path.basename(relative), { bytes: fs.readFileSync(file), mode: fs.statSync(file).mode & 0o777 }];
+  }));
+  files.set("codex-read-aloud-linux", { bytes: Buffer.from(inert), mode: 0o755 });
+  return { root, source, env, marker, files };
+}
+
+function assertReadAloudFile(file, expected) {
+  assert.deepEqual(fs.readFileSync(file), expected.bytes, file);
+  assert.equal(fs.statSync(file).mode & 0o777, expected.mode, file);
+}
+
+function stageReadAloudApp(source, app, env) {
+  const helper = path.join(source, "scripts/lib/linux-features.js");
+  const hooks = childProcess.execFileSync(process.execPath, [helper, "--stage-hooks"], { cwd: source, env, encoding: "utf8" });
+  for (const line of hooks.trim().split("\n").filter(Boolean)) {
+    const [, hook] = line.split("\t");
+    childProcess.execFileSync("bash", [hook], {
+      cwd: source, env: { ...env, SCRIPT_DIR: source, INSTALL_DIR: app, ICON_SOURCE: "" }, stdio: "pipe",
+    });
+  }
+}
+
+function stageReadAloudBuilder(source, app, packageRoot, env) {
+  childProcess.execFileSync("bash", ["-euc", [
+    `REPO_DIR=${shellQuote(source)}`,
+    `APP_DIR=${shellQuote(app)}`,
+    "PACKAGE_NAME=codex-desktop",
+    `. ${shellQuote(path.join(source, "scripts/lib/package-common.sh"))}`,
+    `stage_update_builder_bundle ${shellQuote(packageRoot)}`,
+  ].join("\n")], { cwd: source, env, stdio: "pipe" });
+  return path.join(packageRoot, "opt/codex-desktop/update-builder");
+}
+
+for (const [label, enabled, alternate, rebuilds = 1] of [
+  ["MCP-only", ["read-aloud-mcp"], null, 2],
+  ["both features", ["read-aloud", "read-aloud-mcp"]],
+  ["UI-only", ["read-aloud"]],
+  ["disabled", []],
+  ["MCP-only alternate feature root without sibling resources", ["read-aloud-mcp"], "missing"],
+  ["MCP-only alternate feature root with different sibling resources", ["read-aloud-mcp"], "different"],
+  ["both features with independently customized UI runners", ["read-aloud", "read-aloud-mcp"], "different", 2],
+]) {
+  test(`${label}: ${rebuilds} packaged rebuild(s) without original source or Cargo`, (t) => {
+    const f = createReadAloudBuilderFixture(t, enabled);
+    const alternateRoot = path.join(f.root, "alternate-features");
+    if (alternate) {
+      fs.mkdirSync(alternateRoot);
+      for (const relative of [...enabled, "features.json", "features.example.json", "compatibility.json"]) {
+        fs.cpSync(path.join(f.source, "linux-features", relative), path.join(alternateRoot, relative), { recursive: true });
+      }
+      if (alternate === "different") {
+        for (const relative of readAloudRunnerPaths) {
+          const file = path.join(alternateRoot, "read-aloud", relative);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, "alternate tree does not own MCP runners\n", { mode: 0o600 });
+        }
+      }
+      f.env.CODEX_LINUX_FEATURES_ROOT = alternateRoot;
+    }
+    const mcp = enabled.includes("read-aloud-mcp");
+    const ui = enabled.includes("read-aloud");
+    let app = path.join(f.root, "app-0");
+    stageReadAloudApp(f.source, app, f.env);
+    let builder = stageReadAloudBuilder(f.source, app, path.join(f.root, "package-0"), f.env);
+    fs.rmSync(f.source, { recursive: true });
+    fs.rmSync(alternateRoot, { recursive: true, force: true });
+    f.env.CODEX_LINUX_FEATURES_ROOT = "";
+
+    for (let generation = 1; generation <= rebuilds; generation++) {
+      const featuresRoot = path.join(builder, "linux-features");
+      const helper = require(path.join(builder, "scripts/lib/linux-features.js"));
+      const options = { featuresRoot };
+      assert.deepEqual(helper.enabledLinuxFeaturesConfig(options).enabled.sort(), [...enabled].sort());
+      assert.equal(fs.existsSync(path.join(featuresRoot, "read-aloud")), ui);
+
+      app = path.join(f.root, `app-${generation}`);
+      stageReadAloudApp(builder, app, f.env);
+      if (mcp) {
+        for (const [name, expected] of f.files) {
+          const retained = name === "codex-read-aloud-linux" ? "target/release" : "plugins/openai-bundled/plugins/read-aloud/bin";
+          assertReadAloudFile(path.join(builder, retained, name), expected);
+          assertReadAloudFile(path.join(app, readAloudPluginPath, "bin", name), expected);
+        }
+      } else {
+        assert.equal(fs.existsSync(path.join(builder, "target")), false);
+        assert.equal(fs.existsSync(path.join(builder, "plugins")), false);
+      }
+
+      assert.equal(fs.existsSync(path.join(app, "resources/read-aloud")), ui);
+      if (ui) {
+        for (const name of ["kokoro-stdin", "kokoro_stdin.py"]) {
+          const expected = { ...f.files.get(name) };
+          if (alternate === "different") expected.bytes = Buffer.from("alternate tree does not own MCP runners\n");
+          assertReadAloudFile(path.join(app, "resources/read-aloud", name), expected);
+        }
+      }
+      assert.equal(fs.existsSync(path.join(app, readAloudPluginPath)), mcp);
+      if (generation < rebuilds) {
+        builder = stageReadAloudBuilder(builder, app, path.join(f.root, `package-${generation}`), f.env);
+      }
+      assert.equal(fs.existsSync(f.marker), false, "staging must not execute the backend or Cargo");
+    }
+  });
+}
+
+for (const relative of ["bin/kokoro-stdin", "bin/kokoro_stdin.py"]) {
+  test(`MCP builder rejects a missing required ${relative} during packaging`, (t) => {
+    const f = createReadAloudBuilderFixture(t, ["read-aloud-mcp"]);
+    const app = path.join(f.root, "app");
+    stageReadAloudApp(f.source, app, f.env);
+    const missing = path.join(app, readAloudPluginPath, relative);
+    fs.unlinkSync(missing);
+    assert.throws(() => stageReadAloudBuilder(f.source, app, path.join(f.root, "package"), f.env),
+      (error) => error.status !== 0 && error.stderr.toString().includes(`Missing Read Aloud MCP runner: ${missing}`));
+    assert.equal(fs.existsSync(f.marker), false);
+  });
+}
+
+test("MCP preserves source installer absence and removes a stale template installer", (t) => {
+  const f = createReadAloudBuilderFixture(t, ["read-aloud-mcp"], false);
+  const installer = "bin/install-kokoro-runtime.sh";
+  const app = path.join(f.root, "app-0");
+  stageReadAloudApp(f.source, app, f.env);
+  assert.equal(fs.existsSync(path.join(app, readAloudPluginPath, installer)), false);
+  fs.writeFileSync(path.join(f.source, "plugins/openai-bundled/plugins/read-aloud", installer), "stale installer\n");
+  const builder = stageReadAloudBuilder(f.source, app, path.join(f.root, "package-0"), f.env);
+  fs.rmSync(f.source, { recursive: true });
+  const rebuiltApp = path.join(f.root, "app-1");
+  stageReadAloudApp(builder, rebuiltApp, f.env);
+  assert.equal(fs.existsSync(path.join(builder, "plugins/openai-bundled/plugins/read-aloud", installer)), false);
+  assert.equal(fs.existsSync(path.join(rebuiltApp, readAloudPluginPath, installer)), false);
+  assert.equal(fs.existsSync(f.marker), false);
+});

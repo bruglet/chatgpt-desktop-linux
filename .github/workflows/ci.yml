@@ -72,6 +72,10 @@ jobs:
         run: |
           cargo test --manifest-path global-dictation-linux/Cargo.toml
           cargo clippy --manifest-path global-dictation-linux/Cargo.toml --all-targets -- -D warnings
+      - name: Test Mini KWin helper
+        run: |
+          cargo test --manifest-path linux-features/pet-overlay/kwin-helper/Cargo.toml
+          cargo clippy --manifest-path linux-features/pet-overlay/kwin-helper/Cargo.toml --all-targets -- -D warnings
 
   nix-build:
     strategy:

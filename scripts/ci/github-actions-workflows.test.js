@@ -72,7 +72,22 @@ test("official Linux validation runs fully on every pull request but not hourly"
   assert.match(signedBaseline, /validate-patch-report\.js/);
   assert.match(signedBaseline, /--profile upstream-build/);
   assert.match(signedBaseline, /name: Test required core patches against the signed bundle/);
-  assert.match(signedBaseline, /dpkg-deb -x "\$\{\{ steps\.upstream\.outputs\.package \}\}"/);
+  assert.match(
+    signedBaseline,
+    /dpkg-deb --fsys-tarfile "\$package" \| \\\s+tar -xf - -C "\$asar_dir" --strip-components=4 \\\s+\.\/usr\/lib\/chatgpt\/ChatGPT \\\s+\.\/usr\/lib\/chatgpt\/resources\/app\.asar \\\s+\.\/usr\/lib\/chatgpt\/resources\/app\.asar\.unpacked/,
+  );
+  assert.match(signedBaseline, /asar="\$asar_dir\/resources\/app\.asar"/);
+  assert.match(signedBaseline, /test -x "\$asar_dir\/ChatGPT"/);
+  assert.match(signedBaseline, /test -s "\$asar"/);
+  assert.match(signedBaseline, /test -d "\$asar\.unpacked"/);
+  assert.match(signedBaseline, /echo "asar=\$asar" >> "\$GITHUB_OUTPUT"/);
+  assert.match(signedBaseline, /echo "app_dir=\$asar_dir" >> "\$GITHUB_OUTPUT"/);
+  assert.match(signedBaseline, /echo "executable=\$asar_dir\/ChatGPT" >> "\$GITHUB_OUTPUT"/);
+  assert.doesNotMatch(signedBaseline, /dpkg-deb -x/);
+  assert.equal(
+    (signedBaseline.match(/trap 'rm -rf "\$(?:extracted_asar|fix_root|runtime_metadata)"' EXIT/g) || []).length,
+    6,
+  );
   assert.match(signedBaseline, /CODEX_SIGNED_EXTRACTED_APP="\$extracted_asar"/);
   assert.match(signedBaseline, /corePatchDescriptors\(\)/);
   assert.match(signedBaseline, /ciPolicy \}\) => ciPolicy === "required-upstream"/);
@@ -101,7 +116,7 @@ test("official Linux validation runs fully on every pull request but not hourly"
   assert.match(signedBaseline, /signed renderer regression is not bound to the expected campaign/);
   assert.match(
     signedBaseline,
-    /"\$upstream_root\/usr\/lib\/chatgpt\/resources\/app\.asar"/,
+    /"\$\{\{ steps\.upstream\.outputs\.asar \}\}"/,
   );
   assert.match(signedBaseline, /function requireUniqueAsset\(pattern, description\)/);
   assert.match(signedBaseline, /matches\.length !== 1/);
@@ -128,11 +143,32 @@ test("official Linux validation runs fully on every pull request but not hourly"
   assert.match(signedBaseline, /primary\.includes\(reverseMarker\)/);
   assert.match(
     signedBaseline,
+    /verify-official-linux-features\.js \\\s+"\$extracted_asar" \\\s+"\$\{\{ steps\.upstream\.outputs\.app_dir \}\}"/,
+  );
+  assert.match(
+    signedBaseline,
     /name: Validate the Nix ELF contract against the official payload[\s\S]*?env:\n          CODEX_INSTALL_DIR:.*matrix\.architecture[\s\S]*?nix\/elf-runtime\.cjs fix[\s\S]*?nix\/elf-runtime\.cjs audit/,
   );
   assert.match(
     signedBaseline,
     /nix\/elf-runtime\.cjs validate-upstream[\s\S]*?--root "\$CODEX_INSTALL_DIR"[\s\S]*?--arch "\$\{\{ matrix\.architecture \}\}"/,
+  );
+  assert.match(
+    signedBaseline,
+    /matrix:\n        architecture: \[amd64, arm64\][\s\S]*?name: Qualify Watchbound against the signed runtime executable\n        run:/,
+  );
+  assert.match(
+    signedBaseline,
+    /official_asar="\$\(realpath -- "\$\{\{ steps\.upstream\.outputs\.asar \}\}"\)"[\s\S]*?@electron\/asar extract-file \\\s+"\$official_asar" \\\s+package\.json[\s\S]*?test -s "\$runtime_metadata\/package\.json"[\s\S]*?"\$runtime_metadata" \\\s+"\$\{\{ steps\.upstream\.outputs\.executable \}\}" \\\s+"\$\{\{ matrix\.architecture \}\}"/,
+  );
+  assert.match(signedBaseline, /validateArtifactManifest\(manifest\)/);
+  assert.match(
+    signedBaseline,
+    /validateTargetRuntime\(\s+process\.argv\[2\],[\s\S]*?process\.argv\[3\],\s+\)/,
+  );
+  assert.match(
+    signedBaseline,
+    /runtime\.qualification !== "signed-runtime-executable"/,
   );
 
   const packageMatrix = job(workflow, "package-matrix");

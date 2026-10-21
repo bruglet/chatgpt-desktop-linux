@@ -180,8 +180,9 @@ function syntheticCurrentSettingsVisibility() {
     'var it={"linux-desktop":{component:H},"general-settings":{component:H},"local-environments":{component:H,commandAsset:F,navigation:{assets:{16:F,20:H},ariaHidden:!1}},worktrees:{component:F,commandAsset:H,navigation:{assets:{16:H,20:F},ariaHidden:!1}},environments:{component:H},"mcp-settings":{component:H},connections:{component:H}};',
     "function visible(S){switch(S.slug){case`computer-use`:return!0;case`browser-use`:return!0;case`appearance`:return!0;case`pets`:case`git-settings`:case`worktrees`:case`local-environments`:case`environments`:return!0;case`data-controls`:return!0;case`linux-desktop`:case`general-settings`:case`agent`:case`personalization`:return!0;}}",
     "function loading(r){switch(r){case`browser-use`:return!1;case`hooks-settings`:case`mcp-settings`:return!1}}",
-    "var preload=[`hooks-settings`,`local-environments`,`worktrees`,`storage`,`archived-chats`,`voice`];",
     'var policy={"local-environments":`codexLocal`,"mcp-settings":`codexOrWorkLocal`,worktrees:`codexLocal`};',
+    "var remoteHostPreloadSlugs=[`profile`,`agent`,`personalization`,`mcp-settings`,`plugins-settings`,`file-type-handlers`,`hooks-settings`,`gateways`,`local-environments`,`worktrees`,`storage`,`archived-chats`,`voice`];",
+    "function selectedHostVisibility(isLocal,section){if(!(isLocal||remoteHostPreloadSlugs.includes(section.slug)))return{section,visible:!1,pending:!1,error:!0};return{section,visible:!0,pending:!1,error:!1}}",
   ].join("");
 }
 
@@ -1660,9 +1661,60 @@ test("settings asset patches add navigation, route, visibility, and title", () =
     settingsVisibility,
     /case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return!0/,
   );
-  assert.match(settingsVisibility, /`local-environments`,`agent-workspaces`,`worktrees`,`storage`,`archived-chats`/);
   assert.match(settingsVisibility, /"local-environments":`codexLocal`,"agent-workspaces":`codexLocal`,"mcp-settings":/);
+  assert.match(
+    settingsVisibility,
+    /`hooks-settings`,`gateways`,`local-environments`,`agent-workspaces`,`worktrees`,`storage`/,
+  );
+
+  const currentVisibilityContext = {};
+  vm.runInNewContext(
+    `${syntheticCurrentSettingsVisibility()};this.selectedHostVisibility=selectedHostVisibility;`,
+    currentVisibilityContext,
+  );
+  assert.equal(
+    currentVisibilityContext.selectedHostVisibility(false, { slug: SETTINGS_SLUG }).visible,
+    false,
+  );
+
+  const patchedVisibilityContext = {};
+  vm.runInNewContext(
+    `${settingsVisibility};this.selectedHostVisibility=selectedHostVisibility;`,
+    patchedVisibilityContext,
+  );
+  assert.equal(
+    patchedVisibilityContext.selectedHostVisibility(true, { slug: SETTINGS_SLUG }).visible,
+    true,
+  );
+  assert.equal(
+    patchedVisibilityContext.selectedHostVisibility(false, { slug: SETTINGS_SLUG }).visible,
+    true,
+  );
+  assert.equal(
+    patchedVisibilityContext.selectedHostVisibility(false, { slug: "not-preloaded" }).visible,
+    false,
+  );
   assert.equal(applyAgentWorkspaceSettingsPagePatch(settingsVisibility), settingsVisibility);
+});
+
+test("settings visibility patch rejects missing and duplicate preload allowlist contracts", () => {
+  const currentAllowlist =
+    "`hooks-settings`,`gateways`,`local-environments`,`worktrees`,`storage`";
+  assert.throws(
+    () => applyAgentWorkspaceSettingsPagePatch(
+      syntheticCurrentSettingsVisibility().replace(currentAllowlist, "`hooks-settings`,`gateways`,`storage`"),
+    ),
+    /could not add agent workspace to current settings visibility contracts/,
+  );
+  assert.throws(
+    () => applyAgentWorkspaceSettingsPagePatch(
+      syntheticCurrentSettingsVisibility().replace(
+        currentAllowlist,
+        `${currentAllowlist},${currentAllowlist}`,
+      ),
+    ),
+    /could not uniquely resolve current settings preload allowlist/,
+  );
 });
 
 test("settings title patch rejects unresolved renderer aliases", () => {

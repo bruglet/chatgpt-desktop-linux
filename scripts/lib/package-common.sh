@@ -148,6 +148,12 @@ linux_features_root_path() {
     "$node_bin" "$helper" --features-root
 }
 
+remove_update_builder_test_files() {
+    find "$1" -mindepth 1 \
+        \( -name test.js -o -name '*.test.js' -o -name '*.test-helpers.js' -o -name fixtures \) \
+        -prune -exec rm -rf -- {} +
+}
+
 stage_update_builder_linux_features_tree() {
     local update_builder_root="$1"
     local source_root
@@ -173,6 +179,10 @@ stage_update_builder_linux_features_tree() {
         [ -d "$source" ] || error "Missing enabled Linux feature: $feature_id ($source)"
         mkdir -p "$(dirname "$destination")"
         cp -a "$source" "$destination"
+        case "$relative_dir" in
+            local/*) ;;
+            *) remove_update_builder_test_files "$destination" ;;
+        esac
         find "$destination" -type d -name target -prune -exec rm -rf {} +
         if [ "$feature_id" = "directory-only-working-tree-watch" ]; then
             rm -rf "$destination/acceptance"
@@ -182,6 +192,13 @@ stage_update_builder_linux_features_tree() {
                 "$destination/reaper/src" \
                 "$destination/reaper/Cargo.toml" \
                 "$destination/reaper/Cargo.lock"
+        fi
+        if [ "$feature_id" = "pet-overlay" ]; then
+            rm -rf \
+                "$destination/kwin-helper/src" \
+                "$destination/kwin-helper/tests" \
+                "$destination/kwin-helper/Cargo.toml" \
+                "$destination/kwin-helper/Cargo.lock"
         fi
     done < "$feature_dirs_file"
     rm -f "$feature_dirs_file"
@@ -964,6 +981,7 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/scripts/build-pacman.sh" "$update_builder_root/scripts/build-pacman.sh"
     cp "$REPO_DIR/scripts/patch-linux-window-ui.js" "$update_builder_root/scripts/patch-linux-window-ui.js"
     cp -a "$REPO_DIR/scripts/patches/." "$update_builder_root/scripts/patches/"
+    remove_update_builder_test_files "$update_builder_root/scripts/patches"
 
     for relative in \
         asar-patch.sh \
@@ -1034,6 +1052,12 @@ stage_enabled_native_feature_artifacts() {
                 stage_update_builder_native_artifact \
                     "$APP_DIR/resources/native/codex-global-dictation-linux" \
                     "$update_builder_root/global-dictation-linux/target/release/codex-global-dictation-linux" \
+                    "$feature_id helper"
+                ;;
+            pet-overlay)
+                stage_update_builder_native_artifact \
+                    "$APP_DIR/resources/native/codex-pet-kwin" \
+                    "$update_builder_root/linux-features/pet-overlay/kwin-helper/target/release/codex-pet-kwin" \
                     "$feature_id helper"
                 ;;
             mcp-helper-reaper)

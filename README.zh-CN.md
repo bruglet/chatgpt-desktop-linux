@@ -268,6 +268,7 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `project-task-sort` | 恢复 alternate Projects 的 Created 排序 | [文档](linux-features/project-task-sort/README.md) |
 | `read-aloud` | 为 assistant response 添加 Linux 朗读控件 | [文档](linux-features/read-aloud/README.md) |
 | `read-aloud-mcp` | 让 agent 通过 Linux Read Aloud backend 发声 | [文档](linux-features/read-aloud-mcp/README.md) |
+| `reasoning-visibility` | 在常规设置中添加默认关闭且已翻译的推理摘要开关；重启后生效 | [文档](linux-features/reasoning-visibility/README.md) |
 | `record-and-replay` | 将 Linux 操作演示录制为可复用 skill | [文档](linux-features/record-and-replay/README.md) |
 | `remote-control-ui` | 显示实验性 remote-control 设置 | [文档](linux-features/remote-control-ui/README.md) |
 | `remote-mobile-control` | 实验性 Linux remote-host / outbound-control flow | [文档](linux-features/remote-mobile-control/README.md) |

@@ -293,6 +293,7 @@ requirements, known limitations, configuration, and tests.
 | `project-task-sort` | Restore Created ordering for alternate Projects tasks | [Docs](linux-features/project-task-sort/README.md) |
 | `read-aloud` | Add Linux read-aloud controls to assistant responses | [Docs](linux-features/read-aloud/README.md) |
 | `read-aloud-mcp` | Let the agent speak through the Linux Read Aloud backend | [Docs](linux-features/read-aloud-mcp/README.md) |
+| `reasoning-visibility` | Add a translated, default-off General setting to show reasoning summaries; changes apply after restart | [Docs](linux-features/reasoning-visibility/README.md) |
 | `record-and-replay` | Record a Linux demonstration and turn it into a reusable skill | [Docs](linux-features/record-and-replay/README.md) |
 | `remote-control-ui` | Expose experimental remote-control settings on Linux | [Docs](linux-features/remote-control-ui/README.md) |
 | `remote-mobile-control` | Experimental Linux remote-host and outbound-control flows | [Docs](linux-features/remote-mobile-control/README.md) |

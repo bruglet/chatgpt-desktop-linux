@@ -76,6 +76,9 @@ jobs:
         with:
           name: homebrew-candidate
           path: candidate
+      - name: Resolve candidate from pull request source
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
+        run: python3 packaging/homebrew/candidate.py candidate
       - name: Select release manifest
         if: steps.changes.outputs.run == 'true'
         id: release

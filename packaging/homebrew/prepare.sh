@@ -57,9 +57,17 @@ native_target="$CACHE/native-target"
 if feature_enabled computer-use-linux; then
     CARGO_HOME="$CACHE/cargo" cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml" \
         --target-dir "$native_target" \
-        -p codex-computer-use-linux --bin codex-computer-use-linux --bin codex-computer-use-cosmic
+        -p codex-computer-use-linux --bin codex-computer-use-linux --bin codex-computer-use-cosmic \
+        --bin codex-computer-use-indicator
     export CODEX_COMPUTER_USE_BINARY_SOURCE="$native_target/release/codex-computer-use-linux"
     export CODEX_COMPUTER_USE_COSMIC_BINARY_SOURCE="$native_target/release/codex-computer-use-cosmic"
+    export CODEX_COMPUTER_USE_INDICATOR_BINARY_SOURCE="$native_target/release/codex-computer-use-indicator"
+fi
+if feature_enabled pet-overlay; then
+    CARGO_HOME="$CACHE/cargo" cargo build --locked --release \
+        --manifest-path "$SCRIPT_DIR/linux-features/pet-overlay/kwin-helper/Cargo.toml" \
+        --target-dir "$native_target" --bin codex-pet-kwin
+    export CODEX_PET_KWIN_SOURCE="$native_target/release/codex-pet-kwin"
 fi
 if feature_enabled chronicle-skysight || feature_enabled record-and-replay; then
     CARGO_HOME="$CACHE/cargo" cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml" \

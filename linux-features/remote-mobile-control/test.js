@@ -359,6 +359,13 @@ function syntheticCurrentLocalAppServerLaunchBundle() {
   ].join("");
 }
 
+function syntheticStartupCommandAppServerLaunchBundle() {
+  return [
+    syntheticCurrentLocalAppServerLaunchBundle(),
+    "function bc(e,t=[]){let r={executablePath:`codex`,args:uB()};return{executablePath:r.executablePath,args:[...r.args,...e.startupCommand?.args??[],...t.flatMap(e=>[`-c`,e])]}}",
+  ].join("");
+}
+
 function syntheticCurrentSettingsRefreshBundle() {
   return [
     "var Jn=`[remote-connections/settings]`,Yn=15e3,Xn=[],Zn=[];",
@@ -1662,6 +1669,55 @@ test("Linux remote mobile app-server launch preserves current configured-base ar
     "--remote-control",
     "--analytics-default-enabled",
   ]);
+});
+
+test("Linux startup config check never runs app-server with --remote-control", () => {
+  const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(
+    syntheticStartupCommandAppServerLaunchBundle(),
+  );
+  const run = (env, startupCommand) => {
+    const context = {
+      JSON,
+      module: { exports: {} },
+      process: { env, platform: "linux" },
+    };
+    vm.runInNewContext(`${patched};module.exports=bc;`, context);
+    return Array.from(context.module.exports({ startupCommand }).args);
+  };
+  const startupCommand = { args: ["--print-startup-config"] };
+
+  assert.deepEqual(run({}, startupCommand), [
+    "-c",
+    "features.code_mode_host=true",
+    "app-server",
+    "--analytics-default-enabled",
+    "--print-startup-config",
+  ]);
+  assert.deepEqual(
+    run({ CODEX_REMOTE_CONTROL_APP_SERVER_MODE: "proxy", HOME: "/home/tester" }, startupCommand),
+    ["-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "--print-startup-config"],
+  );
+  // The long-running Desktop app-server keeps owning Remote Control.
+  assert.deepEqual(run({}, undefined), [
+    "-c",
+    "features.code_mode_host=true",
+    "app-server",
+    "--remote-control",
+    "--analytics-default-enabled",
+  ]);
+  assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
+});
+
+test("Linux startup config guard upgrades a bundle patched before the guard existed", () => {
+  const source = syntheticStartupCommandAppServerLaunchBundle();
+  const launchOnly = applyLinuxRemoteMobileAppServerRemoteControlPatch(source).replace(
+    /codexLinuxStartupCommandAppServerArgs\(([\w$]+)\.args,([\w$]+)\.startupCommand\),/gu,
+    "$1.args,",
+  ).replace(/function codexLinuxStartupCommandAppServerArgs\(e,t\)\{.*?\}(?=function |var )/u, "");
+  const upgraded = applyLinuxRemoteMobileAppServerRemoteControlPatch(launchOnly);
+
+  assert.match(upgraded, /\.\.\.codexLinuxStartupCommandAppServerArgs\(r\.args,e\.startupCommand\)/);
+  assert.equal(upgraded.match(/function codexLinuxStartupCommandAppServerArgs/gu).length, 1);
 });
 
 test("Linux remote mobile app-server launch rejects an incomplete local patch marker", () => {

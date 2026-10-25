@@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The app no longer stops at launch with "Organization settings could not be
+  loaded" on upstream 26.1021+. The remote-mobile-control patch added
+  `--remote-control` (or the `proxy` subcommand) to every app-server launch,
+  including the one-shot `--print-startup-config` check, which app-server
+  0.164 rejects. Startup checks now run without those arguments; the
+  long-running Desktop app-server still owns Remote Control.
 - The updater no longer leaks a ~2 GB `workspaces/<version>` directory per
   release under `~/.cache/codex-update-manager`. Cache cleanup only pruned
   superseded upstream `.deb` files, so every rebuilt candidate's extracted app

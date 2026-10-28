@@ -2,11 +2,15 @@
   "enabled": [
     "mcp-helper-reaper",
     "node-repl-reaper",
-    "tray-usage",
     "pet-overlay",
     "computer-use-linux",
     "flatpak-chrome-native-messaging",
-    "record-and-replay"
+    "record-and-replay",
+    "agent-workspace",
+    "community-features-in-gui-settings",
+    "global-dictation",
+    "global-dictation-gnome",
+    "wayland-global-shortcuts"
   ],
   "settings": {
     "model-picker-default-presets": {

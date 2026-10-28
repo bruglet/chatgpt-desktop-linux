@@ -37,16 +37,34 @@ the fork's cask feature selection. Normal Homebrew updates keep that selection.
 
 - `mcp-helper-reaper`
 - `node-repl-reaper`
-- `tray-usage`
 - `pet-overlay`
 - `computer-use-linux`
 - `flatpak-chrome-native-messaging`
 - `record-and-replay`
+- `agent-workspace`
+- `community-features-in-gui-settings`
+- `global-dictation`
+- `global-dictation-gnome`
+- `wayland-global-shortcuts`
 
 Record & Replay also enables its required Chronicle/Skysight dependency.
 The configuration retains the model presets, but the preset feature is disabled.
-The cask builds the Computer Use and Record & Replay helpers before it prepares the app.
+The cask builds the Computer Use, Record & Replay, and shared dictation/Wayland shortcut helpers before it prepares the app.
 A new cask release requires successful validation on both architectures.
+
+Agent Workspaces appears in Settings. Install its separate backend (version
+0.6.0 or newer) from that page and run its diagnostics to check host dependencies.
+The feature catalog appears in Settings → General and shows build inclusion.
+
+The GNOME dictation companion supports GNOME Shell 45–50. After the first launch,
+log out and back in, then enable it explicitly:
+
+```bash
+gnome-extensions enable global-dictation-gnome@chatgpt-community.local
+```
+
+Restart the app after enabling the extension. The global shortcuts use the
+desktop portal and may need consent from your desktop session.
 
 The official and community applications share the Codex profile.
 Do not run both applications concurrently. An existing native `codex-desktop` command or desktop entry can conflict with this cask.

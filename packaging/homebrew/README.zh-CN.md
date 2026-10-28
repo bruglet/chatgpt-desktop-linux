@@ -37,16 +37,31 @@ cask 不会修改 AppArmor 策略、安装系统软件包或关闭 Chromium 沙�
 
 - `mcp-helper-reaper`
 - `node-repl-reaper`
-- `tray-usage`
 - `pet-overlay`
 - `computer-use-linux`
 - `flatpak-chrome-native-messaging`
 - `record-and-replay`
+- `agent-workspace`
+- `community-features-in-gui-settings`
+- `global-dictation`
+- `global-dictation-gnome`
+- `wayland-global-shortcuts`
 
 Record & Replay 也会启用必需的 Chronicle/Skysight 依赖。
 配置保留模型预设，但模型预设功能处于禁用状态。
-cask 在准备应用前编译 Computer Use 和 Record & Replay 辅助程序。
+cask 在准备应用前编译 Computer Use、Record & Replay 以及听写/Wayland 快捷键共用的辅助程序。
 新版 cask 必须先通过双架构验证。
+
+Agent Workspaces 页面位于设置中。在该页面安装单独的后端（0.6.0 或更新版本），
+并运行诊断以检查主机依赖。功能目录位于“设置 → 常规”，显示构建中包含的功能。
+
+GNOME 听写扩展支持 GNOME Shell 45–50。首次启动后，注销并重新登录，再手动启用：
+
+```bash
+gnome-extensions enable global-dictation-gnome@chatgpt-community.local
+```
+
+启用扩展后重启应用。全局快捷键使用桌面 portal，可能需要当前桌面会话的授权。
 
 官方版和社区版共享 Codex 用户资料，不要同时运行。
 若原生安装已占用 `codex-desktop` 命令或桌面文件，请先通过原包管理器卸载冲突的安装。

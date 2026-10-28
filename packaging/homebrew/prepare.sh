@@ -54,6 +54,12 @@ CODEX_MCP_HELPER_REAPER_SOURCE="$(python3 "$SUPPORT" helper "$SCRIPT_DIR/linux-f
 enabled="$(node "$SCRIPT_DIR/scripts/lib/linux-features.js" --enabled)"
 feature_enabled() { grep -Fxq "$1" <<< "$enabled"; }
 native_target="$CACHE/native-target"
+if feature_enabled global-dictation || feature_enabled wayland-global-shortcuts; then
+    CARGO_HOME="$CACHE/cargo" cargo build --locked --release \
+        --manifest-path "$SCRIPT_DIR/global-dictation-linux/Cargo.toml" \
+        --target-dir "$native_target" --bin codex-global-dictation-linux
+    export CODEX_GLOBAL_DICTATION_LINUX_SOURCE="$native_target/release/codex-global-dictation-linux"
+fi
 if feature_enabled computer-use-linux; then
     CARGO_HOME="$CACHE/cargo" cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml" \
         --target-dir "$native_target" \

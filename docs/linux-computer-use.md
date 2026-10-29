@@ -19,7 +19,7 @@ It supports:
 - app listing and accessibility trees through AT-SPI
 - screenshots through GNOME Shell DBus, the Codex GNOME Shell extension, or XDG Desktop Portal
 - window listing and focusing on GNOME, KWin/Plasma 5 and 6, Hyprland, Niri,
-  COSMIC, i3, and generic X11/EWMH window managers; GNOME extension and X11
+  COSMIC, i3, labwc with Selkies IPC, and generic X11/EWMH window managers; GNOME extension and X11
   windows can also be moved and resized
 - keyboard, text, click, scroll, and drag input through `/dev/uinput`, XDG
   RemoteDesktop portal, `xdotool` on X11, or `ydotool`
@@ -40,7 +40,7 @@ keyboard input without a focus event. It follows the same single-dispatch path
 with an explicit monitoring warning. A no-fixed-focus session can still dispatch
 without that PointerRoot warning.
 
-The embedded backend tracks Computer Use 0.7.27. WebKitGTK AT-SPI socket children are resolved through their well-known bus names, and bounded indexed action reads avoid stalled `GetActions` calls. Native action matching uses stable machine-readable `GetName` values, including for Qt controls. Failed desktop actions and intentional refusals map to MCP `isError: true`; a successful action remains successful when only its post-action observation fails.
+The embedded backend tracks Computer Use 0.7.32. WebKitGTK AT-SPI socket children are resolved through their well-known bus names, and bounded indexed action reads avoid stalled `GetActions` calls. Native action matching uses stable machine-readable `GetName` values, including for Qt controls. Failed desktop actions and intentional refusals map to MCP `isError: true`; a successful action remains successful when only its post-action observation fails.
 
 Explicit `x/y` clicks use screenshot capture pixels by default. On KWin Wayland, `coordinate_space: "atspi"` accepts a global AT-SPI screen point together with `element_index` or a semantic selector. Unsupported backends and ambiguous window ownership return an error before pointer input. An already-running desktop portal does not need an activation service file.
 
@@ -218,18 +218,32 @@ sudo usermod -a -G input "$USER"
 Then log out and back in.
 
 On X11, install `xdotool` for layout-correct XTEST keyboard/text input and
-coordinate clicks, and `wmctrl` plus `xprop` for generic EWMH window listing,
+coordinate clicks, scrolls and MCP drags, and `wmctrl` plus `xprop` for generic
+EWMH window listing,
 focus, move, and resize. `xdotool` is preferred only with a nonempty `DISPLAY`;
-ydotool is used when it cannot be launched. Once xdotool starts, a failure or
-timeout is returned and input is never replayed through ydotool. Override
+pointer input reports an error when xdotool is unavailable or fails, without
+using a system-wide input fallback. Keyboard input keeps its existing fallback.
+Override
 keyboard selection with `COMPUTER_USE_LINUX_FORCE_YDOTOOL_KEYBOARD=1` or
 `CODEX_COMPUTER_USE_FORCE_YDOTOOL_KEYBOARD=1`; the corresponding
 `*_FORCE_XDOTOOL_KEYBOARD=1` names force XTEST when available. Set
 `COMPUTER_USE_LINUX_FORCE_YDOTOOL_POINTER=1` or
-`CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER=1` to skip native-X11 xdotool clicks
-and scroll. Native X11 scroll sends XTEST wheel buttons (4 up, 5 down, 6 left,
+`CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER=1` to skip native-X11 xdotool clicks,
+scrolls and MCP drags. Native X11 scroll sends XTEST wheel buttons (4 up, 5 down, 6 left,
 7 right) through xdotool, because GTK 3 drops the single wheel event that
 follows ydotool's absolute move.
+
+MCP drags through XTEST, uinput and the portal send paced intermediate motion.
+Portal endpoints must be shared; intermediate points are clamped to the nearest
+shared monitor across gaps. Press or motion failures attempt release, and a
+partially dispatched gesture is not replayed. Native X11 input stays on `DISPLAY`
+and does not initialize uinput.
+
+labwc window listing requires the Selkies IPC patch and its `labwc.sock`; stock
+labwc does not expose that socket. The IPC and Wayland sockets must belong to
+the same compositor. Activation requires a unique app-id/title match. Window IDs
+include the title, fit JavaScript integers, and require a fresh list after title
+changes. Bounds are omitted until output scaling can be verified.
 
 The Wayland RemoteDesktop portal asks for consent on every new process by
 default. Set `CODEX_COMPUTER_USE_PERSIST_REMOTE_DESKTOP=1` (standalone alias
@@ -355,3 +369,16 @@ python3 computer-use-linux/scripts/x11_type_guard_test.py \
 ```
 
 This is a manual check; the script is not run by the default CI jobs.
+
+The v0.7.28 through v0.7.31 sync reports an unavailable window backend accurately,
+reuses desktop diagnostics for up to 30 seconds while refreshing accessibility
+on every observation, and wakes immediately when short commands exit. Failed
+actions and observations invalidate cached readiness; `doctor` always probes.
+
+On COSMIC Wayland, pointer input uses per-monitor portal streams instead of
+uinput absolute coordinates. EIS input waits for its devices to resume. Portal
+consent preserves the receiving target and focus is verified again before
+targeted input. Window crops use COSMIC window geometry and logical output
+origins. Mixed-monitor mapping has fixture coverage; physical mixed-monitor
+validation remains pending. GNOME Introspect verifies existing app focus without
+opening the overview; exact activation needs the GNOME extension.

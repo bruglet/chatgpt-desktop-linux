@@ -10,18 +10,29 @@
     "community-features-in-gui-settings",
     "global-dictation",
     "global-dictation-gnome",
-    "wayland-global-shortcuts"
+    "wayland-global-shortcuts",
+    "appshots",
+    "start-minimized-to-tray",
+    "model-picker-default-presets"
   ],
   "settings": {
     "model-picker-default-presets": {
       "presets": [
         {
           "model": "gpt-6-luna",
-          "effort": "max"
+          "effort": "high"
         },
         {
-          "model": "gpt-6.1-sol",
+          "model": "gpt-6.1-terra",
           "effort": "low"
+        },
+        {
+          "model": "gpt-6.1-terra",
+          "effort": "medium"
+        },
+        {
+          "model": "gpt-6.1-terra",
+          "effort": "high"
         },
         {
           "model": "gpt-6.1-sol",
@@ -34,14 +45,6 @@
         },
         {
           "model": "gpt-6.1-sol",
-          "effort": "xhigh"
-        },
-        {
-          "model": "gpt-6.1-sol",
-          "effort": "max"
-        },
-        {
-          "model": "gpt-6-astra",
           "effort": "xhigh"
         }
       ]

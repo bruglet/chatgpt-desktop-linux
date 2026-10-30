@@ -51,6 +51,17 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue((self.stage / "prepared/integration").is_dir())
         self.assertFalse((self.stage / "source").exists())
 
+    def test_adapter_uses_current_homebrew_node_without_linked_binary(self):
+        for formula, marker in (("node", "current"), ("node@24", "retired")):
+            node = self.prefix / "opt" / formula / "bin/node"
+            node.parent.mkdir(parents=True)
+            node.write_text(f"#!/bin/sh\nprintf '%s\\n' '{marker}'\n")
+            node.chmod(0o755)
+        self.bundle(b'#!/bin/bash\nset -eu\nmkdir -p "$3"\nnode > "$3/selected-node"\n')
+        result = self.run_bootstrap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.stage / "prepared/selected-node").read_text(), "current\n")
+
     def test_rollback_reprepares_existing_payload(self):
         self.bundle(b'#!/bin/bash\ntest ! -e "$3" || exit 1\nmkdir -p "$3/integration"\n')
         first = self.run_bootstrap()

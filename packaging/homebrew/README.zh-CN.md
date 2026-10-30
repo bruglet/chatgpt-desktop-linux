@@ -20,7 +20,8 @@ codex-desktop --diagnose
 ```
 
 需要支持 Linux `preflight_steps` 和 `command_wrapper` 的 Homebrew 6。
-支持 x86-64 和 ARM64。Homebrew 安装 Node 24、Python、Rust、RPM 解包工具和 curl。
+支持 x86-64 和 ARM64。Homebrew 安装当前的 `node` 配方（Node 26）、Python、Rust、RPM 解包工具和 curl。
+此 fork 的 Homebrew 工作流使用 Node 26 测试。Node 仅用于打包工具；官方桌面运行时仍随应用提供。
 主机需要提供 C 链接器及官方 Electron 程序需要的桌面库。
 Ubuntu 24.04 图形测试使用 GTK 3、NSS、ALSA 和 GBM。
 

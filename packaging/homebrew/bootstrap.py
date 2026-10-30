@@ -40,7 +40,7 @@ rpms = list(stage.glob("*.rpm"))
 if len(rpms) != 1:
     raise ValueError("Expected one staged RPM")
 env = dict(os.environ)
-env["PATH"] = os.pathsep.join([str(prefix / "opt/node@24/bin"), str(prefix / "opt/python@3.14/libexec/bin"),
+env["PATH"] = os.pathsep.join([str(prefix / "opt/node/bin"), str(prefix / "opt/python@3.14/libexec/bin"),
                               str(prefix / "bin"), "/usr/bin", "/bin"])
 # Use Homebrew's sandbox-approved cache, not the user's Cargo/npm directories.
 cache = Path(subprocess.check_output([str(prefix / "bin/brew"), "--cache"], text=True).strip())

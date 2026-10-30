@@ -213,6 +213,8 @@ binary.chmod(0o755)
         self.assertIn("preflight_steps", cask)
         self.assertIn("network_access: true", cask)
         self.assertIn('depends_on formula: "rpm2cpio"', cask)
+        self.assertIn('depends_on formula: "node"', cask)
+        self.assertNotIn('depends_on formula: "node@24"', cask)
         self.assertNotIn('depends_on formula: "rpm"', cask)
         self.assertNotIn("zap trash", cask)
 

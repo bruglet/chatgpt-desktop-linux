@@ -46,14 +46,22 @@ cask 不会修改 AppArmor 策略、安装系统软件包或关闭 Chromium 沙�
 - `global-dictation`
 - `global-dictation-gnome`
 - `wayland-global-shortcuts`
+- `appshots`
+- `start-minimized-to-tray`
+- `model-picker-default-presets`
 
 Record & Replay 也会启用必需的 Chronicle/Skysight 依赖。
-配置保留模型预设，但模型预设功能处于禁用状态。
+Default 模型滑块按以下顺序显示预设：6 Luna High、6.1 Terra Low、Medium、High，
+然后是 6.1 Sol Medium、High、Xhigh。默认仍为 Sol Medium。
+此功能没有预设数量上限；本构建使用七个位置。账号不可用的模型会被省略，
+上游的推理强度显示设置仍然有效。
 cask 在准备应用前编译 Computer Use、Record & Replay 以及听写/Wayland 快捷键共用的辅助程序。
 新版 cask 必须先通过双架构验证。
 
 Agent Workspaces 页面位于设置中。在该页面安装单独的后端（0.6.0 或更新版本），
 并运行诊断以检查主机依赖。功能目录位于“设置 → 常规”，显示构建中包含的功能。
+“启动时最小化到托盘”在“设置 → 常规”中添加开关；更新后请手动选择所需行为。
+AppShots 在输入框中添加窗口截图功能，主机需要可用的截图工具和窗口控制后端。
 
 GNOME 听写扩展支持 GNOME Shell 45–50。首次启动后，注销并重新登录，再手动启用：
 

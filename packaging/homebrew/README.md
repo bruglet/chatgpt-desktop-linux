@@ -46,15 +46,25 @@ the fork's cask feature selection. Normal Homebrew updates keep that selection.
 - `global-dictation`
 - `global-dictation-gnome`
 - `wayland-global-shortcuts`
+- `appshots`
+- `start-minimized-to-tray`
+- `model-picker-default-presets`
 
 Record & Replay also enables its required Chronicle/Skysight dependency.
-The configuration retains the model presets, but the preset feature is disabled.
+The Default model slider uses these presets in order: 6 Luna High, 6.1 Terra
+Low, Medium and High, then 6.1 Sol Medium, High and Xhigh. Sol Medium remains
+the default. There is no feature-defined preset limit; this build uses seven
+positions. Models unavailable to the account are omitted, and upstream effort
+visibility settings still apply.
 The cask builds the Computer Use, Record & Replay, and shared dictation/Wayland shortcut helpers before it prepares the app.
 A new cask release requires successful validation on both architectures.
 
 Agent Workspaces appears in Settings. Install its separate backend (version
 0.6.0 or newer) from that page and run its diagnostics to check host dependencies.
 The feature catalog appears in Settings → General and shows build inclusion.
+Start Minimized to Tray adds switches in Settings → General; enable the desired
+switch there after updating. AppShots adds window capture to the composer and
+requires a working screenshot tool and window-control backend on the host.
 
 The GNOME dictation companion supports GNOME Shell 45–50. After the first launch,
 log out and back in, then enable it explicitly:

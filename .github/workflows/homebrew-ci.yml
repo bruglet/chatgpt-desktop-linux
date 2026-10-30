@@ -68,6 +68,7 @@ jobs:
           bash -n packaging/homebrew/*.sh
           node --test launcher/start.test.js scripts/lib/linux-features.test.js scripts/patch-linux-window-ui.test.js linux-features/tray-usage/test.js linux-features/mcp-helper-reaper/test.js linux-features/node-repl-reaper/test.js
           node --test linux-features/agent-workspace/test.js linux-features/community-features-in-gui-settings/test.js linux-features/global-dictation/test.js linux-features/global-dictation-gnome/test.js linux-features/wayland-global-shortcuts/test.js
+          node --test linux-features/appshots/test.js linux-features/start-minimized-to-tray/test.js linux-features/model-picker-default-presets/test.js
           python3 packaging/homebrew/render-cask.py packaging/homebrew/release.json "$RUNNER_TEMP/expected.rb"
           cmp Casks/chatgpt-community.rb "$RUNNER_TEMP/expected.rb"
           brew style Casks/chatgpt-community.rb

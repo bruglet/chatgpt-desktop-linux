@@ -20,7 +20,8 @@ codex-desktop --diagnose
 ```
 
 Use Homebrew 6 with Linux `preflight_steps` and `command_wrapper` support.
-The cask supports x86-64 and ARM64 Linux. Homebrew installs Node 24, Python, Rust, RPM extraction tools, and curl.
+The cask supports x86-64 and ARM64 Linux. Homebrew installs its current `node` formula (Node 26), Python, Rust, RPM extraction tools, and curl.
+The fork's Homebrew workflows test Node 26. Node is used for packaging tools; the official desktop runtime stays bundled with the app.
 The host must provide a C linker and the desktop libraries that the official Electron payload requires.
 The graphical tests use GTK 3, NSS, ALSA, and GBM on Ubuntu 24.04.
 

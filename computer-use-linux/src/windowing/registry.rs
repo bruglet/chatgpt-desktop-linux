@@ -1,16 +1,21 @@
-use crate::windowing::backends::{cosmic, gnome, hyprland, i3, kwin, niri, x11};
+use crate::windowing::backends::{cosmic, gnome, hyprland, i3, kwin, labwc, niri, x11};
 use crate::windowing::types::WindowInfo;
 use anyhow::{anyhow, Result};
+use std::future::Future;
 
 pub use cosmic::COSMIC_WAYLAND_BACKEND;
 pub use gnome::{GNOME_SHELL_EXTENSION_BACKEND, GNOME_SHELL_INTROSPECT_BACKEND};
 pub use hyprland::HYPRLAND_BACKEND;
 pub use i3::I3_BACKEND;
 pub use kwin::KWIN_BACKEND;
+pub use labwc::LABWC_BACKEND;
 pub use niri::NIRI_BACKEND;
 pub use x11::X11_BACKEND;
 
-pub const WINDOW_PERMISSION_HINT: &str = "Computer Use could not access a supported window list backend. Targeted window input requires session-bus access plus GNOME Shell Introspect, the Codex GNOME Shell extension, the COSMIC Wayland helper, KWin/Plasma DBus scripting, Hyprland hyprctl, the niri IPC socket, or i3-msg. On GNOME, run setup_window_targeting to install the extension backend.";
+/// Reported when no window backend answered, so no backend can be named.
+pub const UNAVAILABLE_BACKEND: &str = "unavailable";
+
+pub const WINDOW_PERMISSION_HINT: &str = "Computer Use could not access a supported window list backend. Targeted window input requires session-bus access plus GNOME Shell Introspect, the Codex GNOME Shell extension, the COSMIC Wayland helper, KWin/Plasma DBus scripting, Hyprland hyprctl, the niri IPC socket, labwc.sock, or i3-msg. On GNOME, run setup_window_targeting to install the extension backend.";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BackendDescriptor {
@@ -40,6 +45,7 @@ enum BackendKind {
     Hyprland,
     Niri,
     I3,
+    Labwc,
     X11,
 }
 
@@ -51,6 +57,7 @@ const BACKEND_ORDER: &[BackendKind] = &[
     BackendKind::Hyprland,
     BackendKind::Niri,
     BackendKind::I3,
+    BackendKind::Labwc,
     // Generic X11/EWMH: last, so a session-native backend always wins first.
     BackendKind::X11,
 ];
@@ -106,6 +113,13 @@ const DESCRIPTORS: &[BackendDescriptor] = &[
         can_exact_focus: true,
     },
     BackendDescriptor {
+        id: LABWC_BACKEND,
+        failure_label: "labwc",
+        list_note: "Window list came from the labwc IPC socket. Terminal windows may include best-effort PTY and active-process context when the process tree is readable.",
+        missing_hint: "On labwc, the session socket labwc.sock lists windows. Activation uses wlr-foreign-toplevel-management.",
+        can_exact_focus: true,
+    },
+    BackendDescriptor {
         id: X11_BACKEND,
         failure_label: "X11/EWMH",
         list_note: "Window list came from X11/EWMH (wmctrl). Terminal windows may include best-effort PTY and active-process context when the process tree is readable.",
@@ -140,49 +154,93 @@ pub fn backend_can_exact_focus(id: &str) -> bool {
     }
 }
 
+/// A window list, with the backends that failed on the way to it.
+pub struct WindowListing {
+    pub windows: Vec<WindowInfo>,
+    /// Backends whose list call failed: those tried before the one that
+    /// answered, and X11 when its exact-focus list failed after GNOME Shell
+    /// Introspect answered. A backend that listed no windows did not fail.
+    pub failed_backends: Vec<&'static str>,
+}
+
 pub async fn list_windows() -> Result<Vec<WindowInfo>> {
-    let mut errors = Vec::new();
+    Ok(list_windows_with_failures().await?.windows)
+}
+
+pub async fn list_windows_with_failures() -> Result<WindowListing> {
+    first_answer(list_windows_for, || {
+        x11::can_exact_focus().then(x11::list_windows_for_exact_focus)
+    })
+    .await
+}
+
+/// Lists through the first backend in `BACKEND_ORDER` that returns windows.
+/// After GNOME Shell Introspect answers, `exact_x11` can supply X11's list,
+/// which wins because X11 can focus a window exactly.
+async fn first_answer<L, LF, X, XF>(mut list: L, exact_x11: X) -> Result<WindowListing>
+where
+    L: FnMut(BackendKind) -> LF,
+    LF: Future<Output = Result<Vec<WindowInfo>>>,
+    X: FnOnce() -> Option<XF>,
+    XF: Future<Output = Result<Vec<WindowInfo>>>,
+{
+    let mut misses = Misses::default();
     for backend in BACKEND_ORDER {
-        if let Some(windows) =
-            usable_backend_windows(*backend, list_windows_for(*backend).await, &mut errors)
-        {
-            if matches!(backend, BackendKind::GnomeIntrospect) {
-                let x11_result = if x11::can_exact_focus() {
-                    Some(x11::list_windows_for_exact_focus().await)
-                } else {
-                    None
+        if let Some(windows) = usable_backend_windows(*backend, list(*backend).await, &mut misses) {
+            let windows = if matches!(backend, BackendKind::GnomeIntrospect) {
+                let x11_result = match exact_x11() {
+                    Some(listing) => Some(listing.await),
+                    None => None,
                 };
-                return Ok(prefer_exact_x11_windows(windows, x11_result, &mut errors));
-            }
-            return Ok(windows);
+                prefer_exact_x11_windows(windows, x11_result, &mut misses)
+            } else {
+                windows
+            };
+            return Ok(WindowListing {
+                windows,
+                failed_backends: misses.failed,
+            });
         }
     }
-    Err(anyhow!(errors.join("; ")))
+    Err(anyhow!(misses.notes.join("; ")))
+}
+
+/// What the backends that gave no usable window list said, in call order.
+#[derive(Default)]
+struct Misses {
+    /// One note per backend, joined into the error when none answers.
+    notes: Vec<String>,
+    failed: Vec<&'static str>,
 }
 
 fn prefer_exact_x11_windows(
     introspect_windows: Vec<WindowInfo>,
     x11_result: Option<Result<Vec<WindowInfo>>>,
-    errors: &mut Vec<String>,
+    misses: &mut Misses,
 ) -> Vec<WindowInfo> {
     x11_result
-        .and_then(|result| usable_backend_windows(BackendKind::X11, result, errors))
+        .and_then(|result| usable_backend_windows(BackendKind::X11, result, misses))
         .unwrap_or(introspect_windows)
 }
 
 fn usable_backend_windows(
     backend: BackendKind,
     result: Result<Vec<WindowInfo>>,
-    errors: &mut Vec<String>,
+    misses: &mut Misses,
 ) -> Option<Vec<WindowInfo>> {
     match result {
         Ok(windows) if !windows.is_empty() => Some(windows),
         Ok(_) => {
-            errors.push(format!("{} returned no windows", backend.failure_label()));
+            misses
+                .notes
+                .push(format!("{} returned no windows", backend.failure_label()));
             None
         }
         Err(error) => {
-            errors.push(format!("{} failed: {error:#}", backend.failure_label()));
+            misses
+                .notes
+                .push(format!("{} failed: {error:#}", backend.failure_label()));
+            misses.failed.push(backend.id());
             None
         }
     }
@@ -197,6 +255,7 @@ async fn list_windows_for(backend: BackendKind) -> Result<Vec<WindowInfo>> {
         BackendKind::Hyprland => hyprland::list_windows().await,
         BackendKind::Niri => niri::list_windows().await,
         BackendKind::I3 => i3::list_windows().await,
+        BackendKind::Labwc => labwc::list_windows().await,
         BackendKind::X11 => x11::list_windows().await,
     }
 }
@@ -204,24 +263,15 @@ async fn list_windows_for(backend: BackendKind) -> Result<Vec<WindowInfo>> {
 pub async fn activate_window(window: &WindowInfo) -> Result<()> {
     match window.backend.as_str() {
         GNOME_SHELL_EXTENSION_BACKEND => gnome::activate_extension_window(window.window_id).await,
-        GNOME_SHELL_INTROSPECT_BACKEND => {
-            let app_id = window
-                .app_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    anyhow!(
-                        "GNOME Shell can only focus by app_id; the matched window has no app_id"
-                    )
-                })?;
-            gnome::focus_app(app_id).await
-        }
+        GNOME_SHELL_INTROSPECT_BACKEND => Err(anyhow!(
+            "GNOME Introspect cannot activate windows. Focus the app manually or install the GNOME Shell extension."
+        )),
         COSMIC_WAYLAND_BACKEND => cosmic::activate_window(window.window_id).await,
         KWIN_BACKEND => kwin::activate_window(window.window_id).await,
         HYPRLAND_BACKEND => hyprland::activate_window(window.window_id).await,
         NIRI_BACKEND => niri::activate_window(window.window_id).await,
         I3_BACKEND => i3::activate_window(window.window_id).await,
+        LABWC_BACKEND => labwc::activate(window).await,
         X11_BACKEND => x11::activate_window(window.window_id).await,
         backend => Err(anyhow!(
             "Unsupported window backend for activation: {backend}"
@@ -238,6 +288,7 @@ pub async fn focused_window_for_backend(backend: &str) -> Result<Option<WindowIn
         HYPRLAND_BACKEND => hyprland::list_windows().await?,
         NIRI_BACKEND => niri::list_windows().await?,
         I3_BACKEND => i3::list_windows().await?,
+        LABWC_BACKEND => return labwc::focused_window().await,
         X11_BACKEND => x11::list_windows_for_exact_focus().await?,
         backend => {
             return Err(anyhow!(
@@ -285,6 +336,7 @@ pub fn probe_backends() -> Vec<BackendProbe> {
         hyprland::probe(),
         niri::probe(),
         i3::probe(),
+        labwc::probe(),
         x11::probe(),
     ]
 }
@@ -299,6 +351,7 @@ impl BackendKind {
             BackendKind::Hyprland => HYPRLAND_BACKEND,
             BackendKind::Niri => NIRI_BACKEND,
             BackendKind::I3 => I3_BACKEND,
+            BackendKind::Labwc => LABWC_BACKEND,
             BackendKind::X11 => X11_BACKEND,
         }
     }
@@ -339,60 +392,139 @@ mod tests {
 
     #[test]
     fn skips_empty_backend_results_so_later_backends_can_answer() {
-        let mut errors = Vec::new();
+        let mut misses = Misses::default();
 
         assert!(
-            usable_backend_windows(BackendKind::GnomeIntrospect, Ok(Vec::new()), &mut errors,)
+            usable_backend_windows(BackendKind::GnomeIntrospect, Ok(Vec::new()), &mut misses,)
                 .is_none()
         );
 
         let windows = usable_backend_windows(
             BackendKind::Kwin,
             Ok(vec![window(KWIN_BACKEND)]),
-            &mut errors,
+            &mut misses,
         )
         .expect("non-empty backend result should be accepted");
 
         assert_eq!(windows[0].backend, KWIN_BACKEND);
-        assert_eq!(errors, vec!["GNOME Shell Introspect returned no windows"]);
+        assert_eq!(
+            misses.notes,
+            vec!["GNOME Shell Introspect returned no windows"]
+        );
     }
 
     #[test]
     fn exact_x11_result_wins_over_gnome_list_only_result() {
-        let mut errors = Vec::new();
+        let mut misses = Misses::default();
         let selected = prefer_exact_x11_windows(
             vec![window(GNOME_SHELL_INTROSPECT_BACKEND)],
             Some(Ok(vec![window(X11_BACKEND)])),
-            &mut errors,
+            &mut misses,
         );
         assert_eq!(selected[0].backend, X11_BACKEND);
-        assert!(errors.is_empty());
+        assert!(misses.notes.is_empty());
     }
 
     #[test]
     fn gnome_list_only_result_survives_failed_x11_listing() {
-        let mut errors = Vec::new();
+        let mut misses = Misses::default();
         let selected = prefer_exact_x11_windows(
             vec![window(GNOME_SHELL_INTROSPECT_BACKEND)],
             Some(Err(anyhow!("wmctrl failed"))),
-            &mut errors,
+            &mut misses,
         );
 
         assert_eq!(selected[0].backend, GNOME_SHELL_INTROSPECT_BACKEND);
-        assert_eq!(errors, ["X11/EWMH failed: wmctrl failed"]);
+        assert_eq!(misses.notes, ["X11/EWMH failed: wmctrl failed"]);
     }
 
     #[test]
     fn records_backend_failures_with_registry_labels() {
-        let mut errors = Vec::new();
+        let mut misses = Misses::default();
 
         assert!(usable_backend_windows(
             BackendKind::Kwin,
             Err(anyhow!("loadScript failed")),
-            &mut errors,
+            &mut misses,
         )
         .is_none());
 
-        assert_eq!(errors, vec!["KWin failed: loadScript failed"]);
+        assert_eq!(misses.notes, vec!["KWin failed: loadScript failed"]);
+    }
+
+    fn listed(backend: &str) -> Result<Vec<WindowInfo>> {
+        Ok(vec![window(backend)])
+    }
+
+    #[tokio::test]
+    async fn a_listing_names_the_backends_that_failed_before_one_answered() {
+        let listing = first_answer(
+            |backend| {
+                std::future::ready(match backend {
+                    BackendKind::GnomeExtension | BackendKind::Cosmic => {
+                        Err(anyhow!("not on the session bus"))
+                    }
+                    BackendKind::GnomeIntrospect => Ok(Vec::new()),
+                    BackendKind::Kwin => listed(KWIN_BACKEND),
+                    _ => Err(anyhow!("tried after KWin answered")),
+                })
+            },
+            || None::<std::future::Ready<_>>,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(listing.windows[0].backend, KWIN_BACKEND);
+        assert_eq!(
+            listing.failed_backends,
+            [GNOME_SHELL_EXTENSION_BACKEND, COSMIC_WAYLAND_BACKEND],
+            "Introspect listed no windows, which is not a failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_exact_focus_x11_list_that_fails_after_introspect_answers_is_an_x11_failure() {
+        let cases = [
+            (
+                "X11 cannot focus exactly here",
+                None,
+                GNOME_SHELL_INTROSPECT_BACKEND,
+                vec![GNOME_SHELL_EXTENSION_BACKEND],
+            ),
+            (
+                "X11's list failed",
+                Some(Err(anyhow!("xprop could not query _NET_ACTIVE_WINDOW"))),
+                GNOME_SHELL_INTROSPECT_BACKEND,
+                vec![GNOME_SHELL_EXTENSION_BACKEND, X11_BACKEND],
+            ),
+            (
+                "X11 listed no windows",
+                Some(Ok(Vec::new())),
+                GNOME_SHELL_INTROSPECT_BACKEND,
+                vec![GNOME_SHELL_EXTENSION_BACKEND],
+            ),
+            (
+                "X11 listed windows",
+                Some(listed(X11_BACKEND)),
+                X11_BACKEND,
+                vec![GNOME_SHELL_EXTENSION_BACKEND],
+            ),
+        ];
+        for (case, x11_result, answered, failed) in cases {
+            let listing = first_answer(
+                |backend| {
+                    std::future::ready(match backend {
+                        BackendKind::GnomeIntrospect => listed(GNOME_SHELL_INTROSPECT_BACKEND),
+                        _ => Err(anyhow!("extension disabled")),
+                    })
+                },
+                || x11_result.map(std::future::ready),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(listing.windows[0].backend, answered, "{case}");
+            assert_eq!(listing.failed_backends, failed, "{case}");
+        }
     }
 }

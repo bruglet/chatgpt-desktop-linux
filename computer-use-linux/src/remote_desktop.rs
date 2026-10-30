@@ -1,4 +1,8 @@
-use crate::{command_runner, diagnostics::hydrate_session_bus_env};
+use crate::{
+    command_runner,
+    diagnostics::hydrate_session_bus_env,
+    ei_input::{DeviceKind, EiInput, Input},
+};
 use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
 use std::{
@@ -58,16 +62,20 @@ const BTN_BACK: i32 = 0x116;
 
 #[derive(Clone)]
 pub struct PortalPointerSession {
+    ei: Option<EiInput>,
     connection: Connection,
     session_handle: OwnedObjectPath,
     streams: Vec<PortalStream>,
     desktop_layout: Option<Vec<LogicalMonitor>>,
+    /// Revalidate against KWin only, so a transient KWin failure cannot swap in kscreen.
+    layout_from_kwin: bool,
     input_lock: Arc<AsyncMutex<()>>,
     valid: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
 pub struct PortalKeyboardSession {
+    ei: Option<EiInput>,
     connection: Connection,
     session_handle: OwnedObjectPath,
     input_lock: Arc<AsyncMutex<()>>,
@@ -99,13 +107,13 @@ struct PortalStream {
     pixel_scale: f64,
 }
 
-#[derive(Debug, Clone)]
-struct LogicalMonitor {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    scale: f64,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LogicalMonitor {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    pub(crate) scale: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +123,7 @@ pub(crate) enum PortalKey {
 }
 
 struct PointerReleaseGuard {
+    ei: Option<EiInput>,
     connection: Connection,
     session_handle: OwnedObjectPath,
     button: Option<i32>,
@@ -124,6 +133,7 @@ struct PointerReleaseGuard {
 }
 
 struct KeyboardReleaseGuard {
+    ei: Option<EiInput>,
     connection: Connection,
     session_handle: OwnedObjectPath,
     pressed: Vec<PortalKey>,
@@ -186,20 +196,42 @@ pub async fn start_portal_pointer_session() -> Result<PortalPointerSession> {
         bail!("remote desktop portal session started without any monitor streams");
     }
 
-    let desktop_layout = logical_desktop_layout().await;
+    let kwin_layout = kwin_desktop_layout().await;
+    let layout_from_kwin = kwin_layout.is_some();
+    let desktop_layout = match kwin_layout {
+        Some(layout) => Some(layout),
+        None => logical_desktop_layout().await,
+    };
     let mut streams = streams;
     if env_token_contains("XDG_CURRENT_DESKTOP", "gnome")
         && mutter_stage_views_scaled(&connection).await
     {
         assign_stream_pixel_scales(&mut streams, desktop_layout.as_deref());
     }
+    let ei = cosmic_eis_input(&connection, &session_handle, DeviceKind::Pointer).await?;
+    if ei.is_some() {
+        // COSMIC video stream sizes are physical, while EIS takes global
+        // logical coordinates. These streams now select outputs only.
+        for stream in &mut streams {
+            if let Some(monitor) = desktop_layout.as_ref().and_then(|layout| {
+                layout
+                    .iter()
+                    .find(|monitor| stream.position == Some((monitor.x, monitor.y)))
+            }) {
+                stream.size = Some((monitor.width, monitor.height));
+                stream.pixel_scale = 1.0;
+            }
+        }
+    }
     cleanup.disarm();
 
     Ok(PortalPointerSession {
+        ei,
         connection,
         session_handle,
         streams,
         desktop_layout,
+        layout_from_kwin,
         input_lock: portal_input_lock(),
         valid: Arc::new(AtomicBool::new(true)),
     })
@@ -224,9 +256,11 @@ pub async fn start_portal_keyboard_session() -> Result<PortalKeyboardSession> {
     if devices & DEVICE_KEYBOARD == 0 {
         bail!("remote desktop portal session started without keyboard access");
     }
+    let ei = cosmic_eis_input(&connection, &session_handle, DeviceKind::Keyboard).await?;
     cleanup.disarm();
 
     Ok(PortalKeyboardSession {
+        ei,
         connection,
         session_handle,
         input_lock: portal_input_lock(),
@@ -237,6 +271,15 @@ pub async fn start_portal_keyboard_session() -> Result<PortalKeyboardSession> {
 fn portal_input_lock() -> Arc<AsyncMutex<()>> {
     static INPUT_LOCK: OnceLock<Arc<AsyncMutex<()>>> = OnceLock::new();
     Arc::clone(INPUT_LOCK.get_or_init(|| Arc::new(AsyncMutex::new(()))))
+}
+
+async fn kwin_desktop_layout() -> Option<Vec<LogicalMonitor>> {
+    if !env_token_contains("XDG_CURRENT_DESKTOP", "kde")
+        && !env_token_contains("XDG_CURRENT_DESKTOP", "plasma")
+    {
+        return None;
+    }
+    crate::windowing::backends::kwin::output_layout().await.ok()
 }
 
 async fn logical_desktop_layout() -> Option<Vec<LogicalMonitor>> {
@@ -593,7 +636,12 @@ pub(crate) async fn click(
 ) -> Result<()> {
     let input_guard = Arc::clone(&session.input_lock).lock_owned().await;
     session.ensure_current_layout().await?;
-    let proxy = remote_desktop_proxy(&session.connection).await?;
+    let proxy = input_proxy(
+        &session.connection,
+        session.ei.clone(),
+        session.streams.clone(),
+    )
+    .await?;
     let mut release_guard = PointerReleaseGuard::new(session, input_guard, operation_guard);
     let (stream_id, x, y) = session.map_absolute_point(x, y)?;
     notify_pointer_motion_absolute(&proxy, &session.session_handle, stream_id, x, y).await?;
@@ -631,7 +679,12 @@ pub async fn scroll(
     } else {
         session.ensure_valid()?;
     }
-    let proxy = remote_desktop_proxy(&session.connection).await?;
+    let proxy = input_proxy(
+        &session.connection,
+        session.ei.clone(),
+        session.streams.clone(),
+    )
+    .await?;
     if let Some((x, y)) = target_point {
         let (stream_id, x, y) = session.map_absolute_point(x, y)?;
         notify_pointer_motion_absolute(&proxy, &session.session_handle, stream_id, x, y).await?;
@@ -722,10 +775,24 @@ pub(crate) async fn drag(
 ) -> Result<()> {
     let input_guard = Arc::clone(&session.input_lock).lock_owned().await;
     session.ensure_current_layout().await?;
-    let proxy = remote_desktop_proxy(&session.connection).await?;
+    let proxy = input_proxy(
+        &session.connection,
+        session.ei.clone(),
+        session.streams.clone(),
+    )
+    .await?;
     let mut release_guard = PointerReleaseGuard::new(session, input_guard, operation_guard);
+    let start = (start_x, start_y);
     let (start_stream, start_x, start_y) = session.map_absolute_point(start_x, start_y)?;
-    let (end_stream, end_x, end_y) = session.map_absolute_point(end_x, end_y)?;
+    // Endpoints must be shared. Intermediate motion may cross a monitor gap;
+    // project it onto the nearest shared stream instead of cancelling consent.
+    session.map_absolute_point(end_x, end_y)?;
+    let points = crate::pointer_path::drag_points(start, (end_x, end_y))
+        .map(|point| {
+            drag_point_on_shared_stream(&session.streams, point)
+                .context("remote desktop portal has no usable stream for drag motion")
+        })
+        .collect::<Result<Vec<_>>>()?;
     notify_pointer_motion_absolute(
         &proxy,
         &session.session_handle,
@@ -743,9 +810,10 @@ pub(crate) async fn drag(
     )
     .await?;
     tokio::time::sleep(Duration::from_millis(35)).await;
-    notify_pointer_motion_absolute(&proxy, &session.session_handle, end_stream, end_x, end_y)
-        .await?;
-    tokio::time::sleep(Duration::from_millis(35)).await;
+    for (stream, x, y) in points {
+        notify_pointer_motion_absolute(&proxy, &session.session_handle, stream, x, y).await?;
+        tokio::time::sleep(crate::pointer_path::DRAG_STEP_DELAY).await;
+    }
     notify_pointer_button(
         &proxy,
         &session.session_handle,
@@ -764,7 +832,7 @@ pub(crate) async fn type_text_with_keysyms(
 ) -> Result<()> {
     let input_guard = Arc::clone(&session.input_lock).lock_owned().await;
     session.ensure_valid()?;
-    let proxy = remote_desktop_proxy(&session.connection).await?;
+    let proxy = input_proxy(&session.connection, session.ei.clone(), Vec::new()).await?;
     let mut release_guard = KeyboardReleaseGuard::new(session, input_guard, operation_guard);
     for keysym in keysyms {
         release_guard.push(PortalKey::Keysym(*keysym));
@@ -804,7 +872,7 @@ pub(crate) async fn press_key_chord(
 ) -> Result<()> {
     let input_guard = Arc::clone(&session.input_lock).lock_owned().await;
     session.ensure_valid()?;
-    let proxy = remote_desktop_proxy(&session.connection).await?;
+    let proxy = input_proxy(&session.connection, session.ei.clone(), Vec::new()).await?;
     let mut release_guard = KeyboardReleaseGuard::new(session, input_guard, operation_guard);
     for modifier in modifiers {
         release_guard.push(*modifier);
@@ -829,6 +897,7 @@ impl PointerReleaseGuard {
         operation_guard: InputOperationGuard,
     ) -> Self {
         Self {
+            ei: session.ei.clone(),
             connection: session.connection.clone(),
             session_handle: session.session_handle.clone(),
             button: None,
@@ -856,10 +925,11 @@ impl Drop for PointerReleaseGuard {
         };
         self.valid.store(false, Ordering::Release);
         let connection = self.connection.clone();
+        let ei = self.ei.clone();
         let session_handle = self.session_handle.clone();
         spawn_release_cleanup(input_guard, operation_guard, async move {
             let _ = tokio::time::timeout(RELEASE_TIMEOUT, async {
-                if let Ok(proxy) = remote_desktop_proxy(&connection).await {
+                if let Ok(proxy) = input_proxy(&connection, ei, Vec::new()).await {
                     let _ = notify_pointer_button(
                         &proxy,
                         &session_handle,
@@ -886,6 +956,7 @@ impl KeyboardReleaseGuard {
         operation_guard: Option<InputOperationGuard>,
     ) -> Self {
         Self {
+            ei: session.ei.clone(),
             connection: session.connection.clone(),
             session_handle: session.session_handle.clone(),
             pressed: Vec::new(),
@@ -946,11 +1017,12 @@ impl Drop for KeyboardReleaseGuard {
         }
         self.valid.store(false, Ordering::Release);
         let connection = self.connection.clone();
+        let ei = self.ei.clone();
         let session_handle = self.session_handle.clone();
         let pressed = std::mem::take(&mut self.pressed);
         spawn_release_cleanup(input_guard, operation_guard, async move {
             let _ = tokio::time::timeout(RELEASE_TIMEOUT, async {
-                if let Ok(proxy) = remote_desktop_proxy(&connection).await {
+                if let Ok(proxy) = input_proxy(&connection, ei, Vec::new()).await {
                     for key in pressed.into_iter().rev() {
                         let _ =
                             notify_keyboard_key(&proxy, &session_handle, key, KEY_RELEASED).await;
@@ -1009,9 +1081,12 @@ impl PortalPointerSession {
             .desktop_layout
             .as_deref()
             .context("remote desktop portal session has no authoritative monitor layout")?;
-        let current = logical_desktop_layout()
-            .await
-            .context("could not revalidate the current monitor layout")?;
+        let current = if self.layout_from_kwin {
+            kwin_desktop_layout().await
+        } else {
+            logical_desktop_layout().await
+        }
+        .context("could not revalidate the current monitor layout")?;
         if !same_monitor_layout(expected, &current) {
             self.invalidate_and_close();
             bail!("desktop monitor layout changed after the remote desktop portal session started");
@@ -1190,6 +1265,33 @@ fn map_capture_axis(value: i32, capture_size: u32, target_origin: i64, target_si
         .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
+fn drag_point_on_shared_stream(
+    streams: &[PortalStream],
+    point: (i32, i32),
+) -> Option<(u32, f64, f64)> {
+    streams
+        .iter()
+        .filter_map(|stream| {
+            let (x, y) = stream.position?;
+            let (width, height) = stream.size?;
+            if width <= 0 || height <= 0 {
+                return None;
+            }
+            let projected = (
+                i64::from(point.0).clamp(i64::from(x), i64::from(x) + i64::from(width) - 1) as i32,
+                i64::from(point.1).clamp(i64::from(y), i64::from(y) + i64::from(height) - 1) as i32,
+            );
+            let dx = i128::from(point.0) - i128::from(projected.0);
+            let dy = i128::from(point.1) - i128::from(projected.1);
+            Some((
+                dx * dx + dy * dy,
+                stream.relative_point(projected.0, projected.1),
+            ))
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, point)| point)
+}
+
 impl PortalStream {
     fn contains_global_point(&self, x: i32, y: i32) -> bool {
         let Some((stream_x, stream_y)) = self.position else {
@@ -1198,7 +1300,12 @@ impl PortalStream {
         let Some((width, height)) = self.size else {
             return false;
         };
-        x >= stream_x && y >= stream_y && x < stream_x + width && y < stream_y + height
+        width > 0
+            && height > 0
+            && x >= stream_x
+            && y >= stream_y
+            && i64::from(x) < i64::from(stream_x) + i64::from(width)
+            && i64::from(y) < i64::from(stream_y) + i64::from(height)
     }
 
     fn relative_point(&self, x: i32, y: i32) -> (u32, f64, f64) {
@@ -1896,13 +2003,88 @@ async fn start_remote_desktop_session(
     Ok((devices, streams, parse_restore_token(&results)))
 }
 
+struct InputProxy<'a> {
+    portal: Proxy<'a>,
+    ei: Option<EiInput>,
+    streams: Vec<PortalStream>,
+}
+impl<'a> std::ops::Deref for InputProxy<'a> {
+    type Target = Proxy<'a>;
+    fn deref(&self) -> &Self::Target {
+        &self.portal
+    }
+}
+async fn input_proxy(
+    connection: &Connection,
+    ei: Option<EiInput>,
+    streams: Vec<PortalStream>,
+) -> Result<InputProxy<'_>> {
+    Ok(InputProxy {
+        portal: remote_desktop_proxy(connection).await?,
+        ei,
+        streams,
+    })
+}
+
+async fn cosmic_eis_input(
+    connection: &Connection,
+    session: &OwnedObjectPath,
+    kind: DeviceKind,
+) -> Result<Option<EiInput>> {
+    if !env_token_contains("XDG_CURRENT_DESKTOP", "cosmic") {
+        return Ok(None);
+    }
+    let proxy = remote_desktop_proxy(connection).await?;
+    let options: HashMap<&str, Value<'_>> = HashMap::new();
+    let fd: zbus::zvariant::OwnedFd = match tokio::time::timeout(
+        PORTAL_CALL_TIMEOUT,
+        proxy.call("ConnectToEIS", &(session, options)),
+    )
+    .await
+    .context("RemoteDesktop ConnectToEIS timed out")?
+    {
+        Ok(fd) => fd,
+        Err(zbus::Error::MethodError(name, _, _))
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.UnknownMethod"
+                    | "org.freedesktop.portal.Error.NotSupported"
+            ) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(error).context("RemoteDesktop ConnectToEIS failed; no input was sent")
+        }
+    };
+    let fd: std::os::fd::OwnedFd = fd.into();
+    let input = EiInput::connect(std::os::unix::net::UnixStream::from(fd), kind).await?;
+    Ok(Some(input))
+}
+
 async fn notify_pointer_motion_absolute(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     stream_id: u32,
     x: f64,
     y: f64,
 ) -> Result<()> {
+    if let Some(ei) = proxy.ei.as_ref() {
+        let stream = proxy
+            .streams
+            .iter()
+            .find(|entry| entry.node_id == stream_id)
+            .context("EIS pointer stream disappeared")?;
+        let (ox, oy) = stream
+            .position
+            .context("EIS pointer stream has no global position")?;
+        return ei
+            .send(Input::Motion(
+                ox as f64 + x / stream.pixel_scale,
+                oy as f64 + y / stream.pixel_scale,
+            ))
+            .await;
+    }
     let options: HashMap<&str, Value<'_>> = HashMap::new();
     let _: () = tokio::time::timeout(
         INPUT_TIMEOUT,
@@ -1918,11 +2100,14 @@ async fn notify_pointer_motion_absolute(
 }
 
 async fn notify_pointer_button(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     button: i32,
     state: u32,
 ) -> Result<()> {
+    if let Some(ei) = proxy.ei.as_ref() {
+        return ei.send(Input::Button(button, state)).await;
+    }
     let options: HashMap<&str, Value<'_>> = HashMap::new();
     let _: () = tokio::time::timeout(
         INPUT_TIMEOUT,
@@ -1935,11 +2120,14 @@ async fn notify_pointer_button(
 }
 
 async fn notify_pointer_axis_discrete(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     axis: u32,
     steps: i32,
 ) -> Result<()> {
+    if let Some(ei) = proxy.ei.as_ref() {
+        return ei.send(Input::Scroll(axis, steps)).await;
+    }
     let options: HashMap<&str, Value<'_>> = HashMap::new();
     let _: () = tokio::time::timeout(
         INPUT_TIMEOUT,
@@ -1955,7 +2143,7 @@ async fn notify_pointer_axis_discrete(
 }
 
 async fn notify_keyboard_key(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     key: PortalKey,
     state: u32,
@@ -1969,11 +2157,14 @@ async fn notify_keyboard_key(
 }
 
 async fn notify_keyboard_keysym(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     keysym: i32,
     state: u32,
 ) -> Result<()> {
+    if let Some(ei) = proxy.ei.as_ref() {
+        return ei.send(Input::Keysym(keysym, state)).await;
+    }
     let options: HashMap<&str, Value<'_>> = HashMap::new();
     let _: () = tokio::time::timeout(
         INPUT_TIMEOUT,
@@ -1986,11 +2177,14 @@ async fn notify_keyboard_keysym(
 }
 
 async fn notify_keyboard_keycode(
-    proxy: &Proxy<'_>,
+    proxy: &InputProxy<'_>,
     session: &OwnedObjectPath,
     keycode: i32,
     state: u32,
 ) -> Result<()> {
+    if let Some(ei) = proxy.ei.as_ref() {
+        return ei.send(Input::Keycode(keycode, state)).await;
+    }
     let options: HashMap<&str, Value<'_>> = HashMap::new();
     let _: () = tokio::time::timeout(
         INPUT_TIMEOUT,
@@ -2564,6 +2758,66 @@ mod tests {
         assert_eq!(
             map_capture_point_to_stream_layout(&streams, &layout, 1280, 800, 2560, 1600),
             Some((960, 600))
+        );
+    }
+
+    #[test]
+    fn drag_motion_crosses_monitor_gaps_without_leaving_shared_streams() {
+        let streams = [
+            PortalStream {
+                node_id: 1,
+                position: Some((0, 0)),
+                size: Some((1920, 1080)),
+                pixel_scale: 1.0,
+            },
+            PortalStream {
+                node_id: 2,
+                position: Some((1920, 0)),
+                size: Some((2560, 1440)),
+                pixel_scale: 1.0,
+            },
+        ];
+        let points: Vec<_> = crate::pointer_path::drag_points((100, 1000), (3000, 1400))
+            .map(|point| drag_point_on_shared_stream(&streams, point).unwrap())
+            .collect();
+        assert_eq!(points.last(), Some(&(2, 1080.0, 1400.0)));
+        assert!(points.iter().any(|(id, _, y)| *id == 1 && *y == 1079.0));
+        for (id, x, y) in points {
+            let stream = streams.iter().find(|stream| stream.node_id == id).unwrap();
+            let (width, height) = stream.size.unwrap();
+            assert!(x >= 0.0 && x < f64::from(width));
+            assert!(y >= 0.0 && y < f64::from(height));
+        }
+    }
+
+    #[test]
+    fn kwin_layout_maps_nested_scale_two_capture() {
+        // Recorded in the alpine-kde webtop at SELKIES_SCALING_DPI=192: kscreen-doctor
+        // reports 2128x1152 at scale 1, while KWin and the portal stream are 1064x576.
+        let streams = [PortalStream {
+            node_id: 46,
+            position: Some((0, 0)),
+            size: Some((1064, 576)),
+            pixel_scale: 1.0,
+        }];
+        let layout = crate::windowing::backends::kwin::kwin_output_layout(
+            r#"{"desktopGeometry":{"x":0,"y":0,"width":1064,"height":576},"outputs":[{"name":"WL-0","geometry":{"x":0,"y":0,"width":1064,"height":576},"devicePixelRatio":2}],"windows":[]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            map_capture_point_to_stream_layout(&streams, &layout, 386, 1092, 2128, 1152),
+            Some((193, 546))
+        );
+
+        // The kscreen view of the same session cannot be mapped: this is why KWin is preferred.
+        let kscreen = parse_kscreen_monitor_layout(
+            br#"{"outputs":[{"name":"WL-0","pos":{"x":0,"y":0},"size":{"height":1152,"width":2128},"scale":1,"connected":true,"enabled":true,"replicationSource":0}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            map_capture_point_to_stream_layout(&streams, &kscreen, 386, 1092, 2128, 1152),
+            None
         );
     }
 

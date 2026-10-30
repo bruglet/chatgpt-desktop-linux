@@ -3,8 +3,11 @@ mod accessibility_guard;
 pub mod atspi_tree;
 mod cli;
 mod command_runner;
+mod diagnostics_cache;
+mod ei_input;
 pub mod indicator;
 mod keyboard_keymap;
+mod pointer_path;
 
 pub mod cosmic_helper;
 pub mod diagnostics;

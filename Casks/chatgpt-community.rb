@@ -3,9 +3,9 @@ cask "chatgpt-community" do
   arch arm: "aarch64", intel: "x86_64"
   os linux: "linux"
 
-  version "26.1023.51421,1"
-  sha256 arm64_linux:  "180cc70dacf1a2871f113b624deefe9fef660491e7f0658893e4edd9ba1f8a69",
-         x86_64_linux: "dfc857b549c68a90900ef7eebae93a1d89c09c7cb634dd260b2b17c0bd3ee562"
+  version "26.1027.30824,1"
+  sha256 arm64_linux:  "07768d648e630f37eb8457dde2f07a1e0aa676d2895835d8b5c8148f6727de45",
+         x86_64_linux: "c45045bef9cff939ff97797fb7b451ae7c5e499f321c02723d94395cf227dc86"
 
   url "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/#{arch}/chatgpt-#{version.csv.first}-1.#{arch}.rpm"
   name "ChatGPT Community"
@@ -42,34 +42,34 @@ cask "chatgpt-community" do
       {
         "schemaVersion": 1,
         "ready": true,
-        "version": "26.1023.51421",
+        "version": "26.1027.30824",
         "revision": 1,
-        "sourceInputSha256": "ef41673aa84078ecd6aeea831833b19cf9b85a6775f9aa098dc5ad1e15067ae4",
+        "sourceInputSha256": "8d968aaf8fc659f6a1d87eb27295841aa84507daa99a9894094586ebe40d774d",
         "source": {
-          "commit": "a30941483f2e0049e084f96a3debe8be06fa2f9c",
-          "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/a30941483f2e0049e084f96a3debe8be06fa2f9c.tar.gz",
-          "sha256": "e9042f7ade7b6acf206486892e2a23d928210ea69454e4b47086bacd9be16f77"
+          "commit": "f28352d4e4daf9d7184e33e983e94743e02fa705",
+          "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/f28352d4e4daf9d7184e33e983e94743e02fa705.tar.gz",
+          "sha256": "be70a727579d3af37fe73ddd8c50187b9e93a21bbaaa5af0f12f600f6960b632"
         },
         "campaign": {
           "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
-          "version": "26.1023.51421",
+          "version": "26.1027.30824",
           "packages": {
             "amd64": {
               "architecture": "amd64",
-              "version": "26.1023.51421",
-              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1023.51421_amd64.deb",
-              "sha256": "4484dc2b54fc0978beb23b8d8d717494e4e0b4fbeab0a876739105e50b44de5a",
-              "size": 517772878
+              "version": "26.1027.30824",
+              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1027.30824_amd64.deb",
+              "sha256": "4e139a44f7c917a643f2dd014ad32298dd30aec6d324d323524b190f7667684c",
+              "size": 534538410
             },
             "arm64": {
               "architecture": "arm64",
-              "version": "26.1023.51421",
-              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1023.51421_arm64.deb",
-              "sha256": "e7478d84f2938dd373fa61c52b0f200b07d610e48947052bd8ad74769b7fd3fb",
-              "size": 494741274
+              "version": "26.1027.30824",
+              "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1027.30824_arm64.deb",
+              "sha256": "b648e2bbc1c430efbc7470c69e6444f7c6d3f32c98a8aab5aa203f2c29d3de05",
+              "size": 510826658
             }
           },
-          "releaseId": "f67b64b29a6906980c7927d680abddb084caaa1e487dc6460cf826b341168a83"
+          "releaseId": "471236729c526a341d70ac6587c0a9c570b72fbad16705f5135e2ff959da97d3"
         },
         "features": {
           "enabled": [
@@ -83,18 +83,29 @@ cask "chatgpt-community" do
             "community-features-in-gui-settings",
             "global-dictation",
             "global-dictation-gnome",
-            "wayland-global-shortcuts"
+            "wayland-global-shortcuts",
+            "appshots",
+            "start-minimized-to-tray",
+            "model-picker-default-presets"
           ],
           "settings": {
             "model-picker-default-presets": {
               "presets": [
                 {
                   "model": "gpt-6-luna",
-                  "effort": "max"
+                  "effort": "high"
                 },
                 {
-                  "model": "gpt-6.1-sol",
+                  "model": "gpt-6.1-terra",
                   "effort": "low"
+                },
+                {
+                  "model": "gpt-6.1-terra",
+                  "effort": "medium"
+                },
+                {
+                  "model": "gpt-6.1-terra",
+                  "effort": "high"
                 },
                 {
                   "model": "gpt-6.1-sol",
@@ -108,14 +119,6 @@ cask "chatgpt-community" do
                 {
                   "model": "gpt-6.1-sol",
                   "effort": "xhigh"
-                },
-                {
-                  "model": "gpt-6.1-sol",
-                  "effort": "max"
-                },
-                {
-                  "model": "gpt-6-astra",
-                  "effort": "xhigh"
                 }
               ]
             }
@@ -123,12 +126,12 @@ cask "chatgpt-community" do
         },
         "packages": {
           "amd64": {
-            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.1023.51421-1.x86_64.rpm",
-            "sha256": "dfc857b549c68a90900ef7eebae93a1d89c09c7cb634dd260b2b17c0bd3ee562"
+            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.1027.30824-1.x86_64.rpm",
+            "sha256": "c45045bef9cff939ff97797fb7b451ae7c5e499f321c02723d94395cf227dc86"
           },
           "arm64": {
-            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.1023.51421-1.aarch64.rpm",
-            "sha256": "180cc70dacf1a2871f113b624deefe9fef660491e7f0658893e4edd9ba1f8a69"
+            "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.1027.30824-1.aarch64.rpm",
+            "sha256": "07768d648e630f37eb8457dde2f07a1e0aa676d2895835d8b5c8148f6727de45"
           }
         }
       }

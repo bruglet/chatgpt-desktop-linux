@@ -12,8 +12,7 @@
     "global-dictation-gnome",
     "wayland-global-shortcuts",
     "appshots",
-    "start-minimized-to-tray",
-    "model-picker-default-presets"
+    "start-minimized-to-tray"
   ],
   "settings": {
     "model-picker-default-presets": {

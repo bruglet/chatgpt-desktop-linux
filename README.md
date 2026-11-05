@@ -290,6 +290,7 @@ requirements, known limitations, configuration, and tests.
 | `computer-use-linux` | Linux desktop-control UI and native MCP backend | [Docs](linux-features/computer-use-linux/README.md) |
 | `copilot-reasoning-effort` | Persistent reasoning-effort defaults for Copilot-auth sessions | [Docs](linux-features/copilot-reasoning-effort/README.md) |
 | `desktop-identity` | Use the Community desktop entry for notification and child-process desktop identity | [Docs](linux-features/desktop-identity/README.md) |
+| `desktop-new-window` | Add a New Window action to the ChatGPT Community desktop launcher | [Docs](linux-features/desktop-new-window/README.md) |
 | `directory-only-working-tree-watch` | Bounded Watchbound working-tree watching | [Docs](linux-features/directory-only-working-tree-watch/README.md) |
 | `filesystem-root-follow-ups` | Allow follow-ups in existing local tasks rooted at `/` | [Docs](linux-features/filesystem-root-follow-ups/README.md) |
 | `flatpak-chrome-native-messaging` | Bridge the official Chrome extension into Flatpak Google Chrome | [Docs](linux-features/flatpak-chrome-native-messaging/README.md) |
@@ -318,6 +319,7 @@ requirements, known limitations, configuration, and tests.
 | `start-minimized-to-tray` | Add opt-in General settings to start hidden in the tray, either on every launch or only at login autostart | [Docs](linux-features/start-minimized-to-tray/README.md) |
 | `thorium-chrome-plugin` | Add Thorium to the official bundled Chrome integration | [Docs](linux-features/thorium-chrome-plugin/README.md) |
 | `tray-usage` | Show usage remaining in the Linux system-tray menu | [Docs](linux-features/tray-usage/README.md) |
+| `usage-limit-send-attempt` | Keep Send available in local Codex threads when the signed-in account reports exhausted usage | [Docs](linux-features/usage-limit-send-attempt/README.md) |
 | `ui-tweaks` | Optional visual and interaction customizations | [Docs](linux-features/ui-tweaks/README.md) |
 
 For GNOME Wayland dictation without RemoteDesktop permission prompts, select

@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "ready": true,
   "version": "26.1103.32239",
-  "revision": 3,
-  "sourceInputSha256": "1e24162f1601d7292c15cceddb10319c9d1b4b2c905c9929bbb0e217b57104ff",
+  "revision": 4,
+  "sourceInputSha256": "89b3a68c2d8788647184b50d0d193067dc15dec3932e08955c461140004f9dd8",
   "source": {
-    "commit": "f763da62c3d3be42b67de46c5e2ebe3c3275c2d7",
-    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/f763da62c3d3be42b67de46c5e2ebe3c3275c2d7.tar.gz",
-    "sha256": "b394f26e03e3307b3cc9c2a6b64262a44e652cc2ef3614941461257920c7d973"
+    "commit": "62d49c19ed906276b757f96c87904f023f678793",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/62d49c19ed906276b757f96c87904f023f678793.tar.gz",
+    "sha256": "3c6213b4f2f1082be28c1adbe616bdc9eeb1c30bbd88a7468fde8baf3bb6ee95"
   },
   "campaign": {
     "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
@@ -34,7 +34,6 @@
     "enabled": [
       "mcp-helper-reaper",
       "node-repl-reaper",
-      "pet-overlay",
       "computer-use-linux",
       "flatpak-chrome-native-messaging",
       "record-and-replay",

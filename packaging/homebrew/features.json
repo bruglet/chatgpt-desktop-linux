@@ -2,7 +2,6 @@
   "enabled": [
     "mcp-helper-reaper",
     "node-repl-reaper",
-    "pet-overlay",
     "computer-use-linux",
     "flatpak-chrome-native-messaging",
     "record-and-replay",

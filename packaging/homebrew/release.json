@@ -1,34 +1,34 @@
 {
   "schemaVersion": 1,
   "ready": true,
-  "version": "26.1111.71025",
+  "version": "26.1111.71704",
   "revision": 1,
-  "sourceInputSha256": "89b98dfaa1c1df1095fe86a1b8d367220282e5ad3ab24e017cd4fdb3fbe77dcc",
+  "sourceInputSha256": "5e8b6c8bca59a6e3c1d52946f7a5a6f41404e48f9524be985fd4485a935b8429",
   "source": {
-    "commit": "2bc86d81c2723d70de665d33cb4795377fe05d84",
-    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/2bc86d81c2723d70de665d33cb4795377fe05d84.tar.gz",
-    "sha256": "762470c1952b41c6cc8d3c59faebe84f284efb85fda80f78aba4790ad14e8be0"
+    "commit": "e7b1a5ba47ca55bf4c175a7949561fa683231441",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/e7b1a5ba47ca55bf4c175a7949561fa683231441.tar.gz",
+    "sha256": "c5a5bd8c20c62ff495c5b3093080116f0cf374d6196767e7ca18170d7f5c1141"
   },
   "campaign": {
     "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
-    "version": "26.1111.71025",
+    "version": "26.1111.71704",
     "packages": {
       "amd64": {
         "architecture": "amd64",
-        "version": "26.1111.71025",
-        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1111.71025_amd64.deb",
-        "sha256": "8197424cbcea3a7c0d445a544eaa6b99df8b8ef8b1d182e2b743f702753c7a70",
-        "size": 568022038
+        "version": "26.1111.71704",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1111.71704_amd64.deb",
+        "sha256": "01eef7c77c835f7e1afb92ba1c29178a4c19d6c66573bdd3b86520e2abf806a4",
+        "size": 568039850
       },
       "arm64": {
         "architecture": "arm64",
-        "version": "26.1111.71025",
-        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1111.71025_arm64.deb",
-        "sha256": "55d861fb4c8d1b54033e4d4178f344f0b9247352bf80290420f44d15dec4a2ba",
-        "size": 553107014
+        "version": "26.1111.71704",
+        "repositoryPath": "pool/main/c/chatgpt/chatgpt_26.1111.71704_arm64.deb",
+        "sha256": "f0550dee1f99127d357ad760aef739c557d49bd67728d2f105d00a7a4780f740",
+        "size": 553280718
       }
     },
-    "releaseId": "d14f2e6a4e578cc36ddbc486812eddb22b131c1758c6caae2eaf1af065d4f87f"
+    "releaseId": "125bfd1479fe15f62cf78406bb6f7bf6eab82ad4be005eda521d983c6c5b199d"
   },
   "features": {
     "enabled": [
@@ -83,12 +83,12 @@
   },
   "packages": {
     "amd64": {
-      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.1111.71025-1.x86_64.rpm",
-      "sha256": "1e0a98c895d9d10c2ad7eca9c311d37efbf200f3ddc77c7e06edd82a0462d664"
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/x86_64/chatgpt-26.1111.71704-1.x86_64.rpm",
+      "sha256": "efc911c846aa1d9c2d9cbc2cb6940d325f078faa49a720b13d3edb9a37f00035"
     },
     "arm64": {
-      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.1111.71025-1.aarch64.rpm",
-      "sha256": "8febe277aa9893472c78a8e0db822440223820ccaed8bddab4570eb4fa1110d5"
+      "url": "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/aarch64/chatgpt-26.1111.71704-1.aarch64.rpm",
+      "sha256": "85b855b3a9d36bc042ea38b6d7104a1e5bbf68d0910244d85a9d7bcd2a0f9104"
     }
   }
 }

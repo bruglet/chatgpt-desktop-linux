@@ -113,7 +113,7 @@ jobs:
           bash packaging/homebrew/lifecycle.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/homebrew-payload"
       - name: Upload validated Homebrew payload
         if: inputs.candidate && steps.release.outputs.ready == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: homebrew-payload-${{ matrix.os }}
           path: ${{ runner.temp }}/homebrew-payload/*.tar.gz

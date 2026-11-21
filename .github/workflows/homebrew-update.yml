@@ -120,3 +120,50 @@ jobs:
             gh pr edit "$pr" --body-file "$RUNNER_TEMP/pr-body.md"
           fi
           gh pr merge "$pr" --auto --merge
+
+  publish-payload:
+    needs: [candidate, validate, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: homebrew-candidate
+          path: payload
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          pattern: homebrew-payload-*
+          merge-multiple: true
+          path: payload
+      - name: Publish assembled Homebrew payloads
+        working-directory: payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(jq -er '.source.commit' release.json)" = "$SOURCE_SHA"
+          version="$(jq -er '"\(.version)-\(.revision)"' release.json)"
+          tag="homebrew-${version}-${SOURCE_SHA}"
+          archives=(chatgpt-community-linux-{amd64,arm64}.tar.gz)
+          sha256sum "${archives[@]}" release.json > SHA256SUMS
+          assets=("${archives[@]}" release.json SHA256SUMS)
+
+          if status="$(gh release view "$tag" --json isDraft,assets)"; then
+            if jq -e '.isDraft' <<< "$status" >/dev/null; then
+              gh release upload "$tag" "${assets[@]}" --clobber
+              gh release edit "$tag" --draft=false --latest=false
+            else
+              diff -u <(printf '%s\n' "${assets[@]}" | sort) \
+                <(jq -r '.assets[] | select(.state == "uploaded") | .name' <<< "$status" | sort)
+              gh release download "$tag" --pattern release.json --dir "$RUNNER_TEMP/published-homebrew"
+              cmp release.json "$RUNNER_TEMP/published-homebrew/release.json"
+            fi
+          else
+            gh release create "$tag" "${assets[@]}" --target "$SOURCE_SHA" --latest=false \
+              --title "ChatGPT Community Homebrew payload $version" \
+              --notes "Assembled Linux payloads for x86-64 and ARM64 from source commit $SOURCE_SHA."
+          fi

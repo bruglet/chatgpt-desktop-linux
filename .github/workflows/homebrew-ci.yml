@@ -103,14 +103,24 @@ jobs:
           PY
           bash packaging/homebrew/verify-candidate.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/equivalence"
           bash packaging/homebrew/clean-asar.sh "$RUNNER_TEMP/equivalence/rpm/usr/lib/chatgpt"
+          rm -rf -- "$RUNNER_TEMP/equivalence"
       - name: Install and exercise cask with sandbox enabled
         if: steps.changes.outputs.run == 'true' && steps.release.outputs.ready == 'true'
         run: |
           # Only this disposable CI runner changes its user-namespace policy.
           # Electron and Homebrew sandboxing remain enabled.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          bash packaging/homebrew/lifecycle.sh '${{ steps.release.outputs.manifest }}'
-      - name: Upload diagnostics only
+          bash packaging/homebrew/lifecycle.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/homebrew-payload"
+      - name: Upload validated Homebrew payload
+        if: inputs.candidate && steps.release.outputs.ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0
+        with:
+          name: homebrew-payload-${{ matrix.os }}
+          path: ${{ runner.temp }}/homebrew-payload/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

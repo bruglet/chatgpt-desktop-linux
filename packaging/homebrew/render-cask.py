@@ -39,7 +39,7 @@ cask "chatgpt-community" do
 
   command_wrapper "codex-desktop",
                   executable: "#{staged_path}/prepared/app/start.sh",
-                  env:        {{ "BAMF_DESKTOP_FILE_HINT" => desktop_file }
+                  env:        { "BAMF_DESKTOP_FILE_HINT" => desktop_file }
   artifact "prepared/codex-desktop.desktop",
            target: desktop_file
   artifact "prepared/codex-desktop.png",

@@ -125,7 +125,11 @@ DEB 将 Electron 的 `LICENSE` 移至 `usr/share/doc/chatgpt/copyright`。
 
 cask 版本格式为 `<OpenAI version>,<downstream revision>`。
 cask 内嵌发布清单和简短启动脚本。它先校验固定源码归档，再运行 RPM 适配器。
-补丁引擎和功能代码仍来自源码归档。工作流仅上传元数据和诊断信息，不发布修改后的 ChatGPT。
+补丁引擎和功能代码仍来自源码归档。
+CI 也会归档两个架构的 `prepared/app`，并解包运行图形启动测试。
+验证通过后，更新工作流将两个归档、`SHA256SUMS` 和 `release.json` 发布到
+标签为 `homebrew-<OpenAI version>-<downstream revision>-<source commit>` 的 GitHub Release。
+cask 仍直接从 OpenAI 下载 RPM。归档不含桌面快捷方式，因为它包含本机的 Homebrew 安装路径。
 
 本地验证命令及适配器接口见 [英文说明](README.md)。
 请勿在个人 Homebrew 安装上运行 `lifecycle.sh`；它仅适用于一次性 GitHub Actions 主机。

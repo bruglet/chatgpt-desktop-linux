@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MANIFEST="$(realpath "$1")"
+PAYLOAD_DIR="$(realpath -m "$2")"
 test "${GITHUB_ACTIONS:-}" = true
 test -z "${HOMEBREW_NO_SANDBOX_LINUX:-}"
 brew ruby -e 'require "sandbox"; abort "Homebrew Linux sandbox unavailable" unless Sandbox.available?'
@@ -44,9 +45,27 @@ brew upgrade --cask "$token" 2>&1 | tee "$LOGS/upstream-upgrade.log"
 test -f "$XDG_DATA_HOME/applications/codex-desktop.desktop"
 test -f "$XDG_DATA_HOME/icons/codex-desktop.png"
 version="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(str(r["version"])+","+str(r["revision"]))' "$MANIFEST")"
-app="$(brew --prefix)/Caskroom/chatgpt-community/$version/prepared/app"
+stage="$(brew --prefix)/Caskroom/chatgpt-community/$version"
+app="$stage/prepared/app"
 cp "$app/.codex-linux/patch-report.json" "$LOGS/patch-report.json"
 cp "$MANIFEST" "$LOGS/release.json"
+
+# Package the verified release before the app runs or the test changes its revision.
+# The desktop entry is generated for the local Homebrew prefix during install.
+(
+    mkdir -p "$PAYLOAD_DIR"
+    archive="$PAYLOAD_DIR/chatgpt-community-linux-$(dpkg --print-architecture).tar.gz"
+    extracted="$(mktemp -d "$RUNNER_TEMP/homebrew-archive.XXXXXX")"
+    trap 'rm -rf -- "$extracted"' EXIT
+    tar -czf "$archive" --sort=name --owner=0 --group=0 --numeric-owner \
+        -C "$stage" prepared/app
+    tar -xzf "$archive" -C "$extracted"
+    extracted_app="$extracted/prepared/app"
+    cmp "$MANIFEST" "$extracted_app/.codex-linux/homebrew-release.json"
+    "$extracted_app/start.sh" --diagnose
+    bash "$ROOT/packaging/homebrew/graphical-smoke.sh" "$extracted_app/start.sh" \
+        "$RUNNER_TEMP/payload-graphical-home" > "$LOGS/payload-graphical.log" 2>&1
+)
 
 bash "$ROOT/packaging/homebrew/graphical-smoke.sh" "$(brew --prefix)/bin/codex-desktop" \
     "$RUNNER_TEMP/graphical-home" > "$LOGS/graphical.log" 2>&1

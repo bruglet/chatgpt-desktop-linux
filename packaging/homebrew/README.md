@@ -142,7 +142,12 @@ The cask version is `<OpenAI version>,<downstream revision>`.
 The generated cask embeds the release manifest and a small bootstrap program.
 The bootstrap verifies the pinned source archive before it runs the RPM adapter.
 The feature engine and feature code remain in the source archive, outside the cask.
-Automation uploads metadata and diagnostics only. It does not publish patched ChatGPT payloads.
+CI also archives `prepared/app` for both architectures and smoke-tests each
+extracted archive. After validation, the update workflow publishes both archives,
+`SHA256SUMS`, and `release.json` to a GitHub release tagged
+`homebrew-<OpenAI version>-<downstream revision>-<source commit>`.
+The cask still uses the direct OpenAI RPM download described above. The archives
+omit the desktop entry because it contains the installation's Homebrew prefix.
 
 Run local checks with these commands from the repository root:
 

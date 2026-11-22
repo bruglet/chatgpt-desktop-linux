@@ -27,7 +27,8 @@ class CaskEnvironmentTests(unittest.TestCase):
                         'c = Cask::CaskLoader::FromContentLoader.new(File.read(ARGV.fetch(0))).load(config: nil); '
                         'c.artifacts.grep(Cask::Artifact::Artifact).each { |a| puts a.target }',
                         str(cask),
-                    ], env=environment, text=True, capture_output=True, check=True)
+                    ], env=environment, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
                     data_home = Path(value) if value.startswith("/") else Path.home() / ".local/share"
                     self.assertEqual(set(result.stdout.splitlines()), {
                         str(data_home / "applications/codex-desktop.desktop"),

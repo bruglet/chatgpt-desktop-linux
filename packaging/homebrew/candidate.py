@@ -5,7 +5,6 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
-import sys
 
 from support import digest, run
 
@@ -62,8 +61,6 @@ def main():
         download(url, rpm)
         release["packages"][arch] = {"url": url, "sha256": digest(rpm)}
     (output / "release.json").write_text(json.dumps(release, indent=2) + "\n")
-    subprocess.run([sys.executable, str(root / "packaging/homebrew/render-cask.py"),
-                    str(output / "release.json"), str(output / "chatgpt-community.rb")], check=True)
 
 
 if __name__ == "__main__":

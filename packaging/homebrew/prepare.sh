@@ -30,6 +30,7 @@ if (JSON.stringify(release.features) !== JSON.stringify(features)) throw Error('
 NODE
 mkdir -p "$(dirname "$OUTPUT")" "$CACHE"
 WORK_DIR="$(mktemp -d "$(dirname "$OUTPUT")/.homebrew-prepare.XXXXXX")"
+trap 'rm -rf -- "$WORK_DIR"' EXIT
 . "$SCRIPT_DIR/scripts/lib/install-helpers.sh"
 . "$SCRIPT_DIR/scripts/lib/asar-patch.sh"
 . "$SCRIPT_DIR/scripts/lib/linux-features.sh"

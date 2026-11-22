@@ -1,17 +1,8 @@
 # Homebrew：ChatGPT Community
 
-此 cask 直接下载 OpenAI 的官方 Linux RPM，并在本机应用现有社区功能。
-它不下载 AppImage，也不分发修改后的 ChatGPT 二进制文件。
-
-## 首次发布
-
-初始 cask 处于禁用状态。新适配器必须先进入 GitHub 上可下载的源码提交，并通过两个架构的验证。
-实现合并到 `main` 后，`Update Homebrew Cask` 工作流会创建首次发布 PR。
-该 PR 合并后即可安装。请勿手动移除 `disable!`。
+此 cask 在 x86-64 和 ARM64 Linux 上安装预构建的 ChatGPT Community 归档。
 
 ## 安装
-
-首次验证发布完成后，运行：
 
 ```bash
 brew tap bruglet/chatgpt-desktop-linux https://github.com/bruglet/chatgpt-desktop-linux
@@ -20,9 +11,7 @@ codex-desktop --diagnose
 ```
 
 需要支持 Linux `preflight_steps` 和 `command_wrapper` 的 Homebrew 6。
-支持 x86-64 和 ARM64。Homebrew 安装当前的 `node` 配方（Node 26）、Python、Rust、RPM 解包工具和 curl。
-此 fork 的 Homebrew 工作流使用 Node 26 测试。Node 仅用于打包工具；官方桌面运行时仍随应用提供。
-主机需要提供 C 链接器及官方 Electron 程序需要的桌面库。
+Homebrew 校验并解包归档。主机需要提供 Electron 所需的桌面库。
 Ubuntu 24.04 图形测试使用 GTK 3、NSS、ALSA 和 GBM。
 
 主机必须允许 Chromium 沙箱使用非特权用户命名空间。
@@ -56,7 +45,7 @@ Default 模型滑块按以下顺序显示预设：6 Luna High、6.1 Terra Low、
 然后是 6.1 Sol Medium、High、Xhigh。默认仍为 Sol Medium。
 此功能没有预设数量上限；本构建使用七个位置。账号不可用的模型会被省略，
 上游的推理强度显示设置仍然有效。
-cask 在准备应用前编译 Computer Use、Record & Replay 以及听写/Wayland 快捷键共用的辅助程序。
+CI 编译并打包所需的辅助程序。
 新版 cask 必须先通过双架构验证。
 
 Agent Workspaces 页面位于设置中。在该页面安装单独的后端（0.6.0 或更新版本），
@@ -88,10 +77,7 @@ brew upgrade --cask bruglet/chatgpt-desktop-linux/chatgpt-community
 普通更新同时支持 OpenAI 版本更新和社区补丁修订，无需 `--greedy`。
 更新由 Homebrew 管理，不安装社区更新器。
 
-首次安装会从源码编译 MCP helper。后续安装会复用经过校验的本地缓存。
-缓存键包含源码、Cargo 锁文件、架构、编译器信息和构建参数。
-只有 OpenAI 版本变化时，无需重新编译 helper。缓存缺失、损坏或构建输入改变时会重新编译。
-Homebrew 清理缓存不会影响安装正确性。
+首个预构建版本可以直接升级基于 RPM 的 cask。Homebrew 替换旧版程序目录并保留用户资料。
 
 ```bash
 brew uninstall --cask bruglet/chatgpt-desktop-linux/chatgpt-community
@@ -101,10 +87,8 @@ brew uninstall --cask bruglet/chatgpt-desktop-linux/chatgpt-community
 
 ## 错误恢复
 
-解包或补丁失败会在公开启动器和桌面文件安装前终止。
-Homebrew 控制升级回滚。CI 生命周期测试验证对应 Homebrew 版本的行为。
-重新安装可能先移除旧安装，因此不能将重新安装视为事务备份。
-若重新安装失败，请保留日志，解决依赖、下载或补丁问题后再次安装。
+Homebrew 校验下载文件并负责升级回滚。
+重新安装可能先移除旧安装。若安装失败，请保留日志并解决下载或安装问题。
 
 ## 维护
 
@@ -115,21 +99,18 @@ Homebrew 控制升级回滚。CI 生命周期测试验证对应 Homebrew 版本�
 DEB 将 Electron 的 `LICENSE` 移至 `usr/share/doc/chatgpt/copyright`。
 比较过程仍校验该文件与 RPM 中 `LICENSE` 的内容及可执行权限，不会忽略许可证差异。
 
-实际 cask 测试保持 Homebrew 沙箱启用。
-图形测试只在一次性 CI 主机上调整 AppArmor 用户命名空间限制；客户端安装不修改主机配置。
-两个架构验证成功后，工作流创建 `automation/homebrew-cask` PR 并启用自动合并。
+CI 在两个架构上构建、解包并启动应用。发布归档后，工作流获取发布文件的校验值，并创建
+`automation/homebrew-cask` PR。PR 使用 Homebrew 沙箱测试已发布的 cask。
+只有一次性 CI 主机会为图形测试调整 AppArmor。
 
 请配置具有 Contents 和 Pull requests 写权限的 `UPSTREAM_SYNC_TOKEN`。
 请在发布 PR 的仓库规则中要求两个 Homebrew CI 架构检查。
 该令牌必须能够触发 PR 工作流，不能只使用 `GITHUB_TOKEN`。
 
 cask 版本格式为 `<OpenAI version>,<downstream revision>`。
-cask 内嵌发布清单和简短启动脚本。它先校验固定源码归档，再运行 RPM 适配器。
-补丁引擎和功能代码仍来自源码归档。
-CI 也会归档两个架构的 `prepared/app`，并解包运行图形启动测试。
-验证通过后，更新工作流将两个归档、`SHA256SUMS` 和 `release.json` 发布到
-标签为 `homebrew-<OpenAI version>-<downstream revision>-<source commit>` 的 GitHub Release。
-cask 仍直接从 OpenAI 下载 RPM。归档不含桌面快捷方式，因为它包含本机的 Homebrew 安装路径。
+归档包含 `prepared/app`。GitHub Release 包含归档、`SHA256SUMS` 和 `release.json`，
+标签格式为 `homebrew-<OpenAI version>-<downstream revision>-<source commit>`。
+Homebrew 根据本机安装路径生成桌面快捷方式。
 
 本地验证命令及适配器接口见 [英文说明](README.md)。
 请勿在个人 Homebrew 安装上运行 `lifecycle.sh`；它仅适用于一次性 GitHub Actions 主机。

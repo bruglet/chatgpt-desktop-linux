@@ -205,18 +205,19 @@ binary.chmod(0o755)
         spec = importlib.util.spec_from_file_location("render", Path(__file__).with_name("render-cask.py"))
         renderer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(renderer)
-        cask = renderer.render({"ready": True, "source": {}})
-        self.assertNotIn("auto_updates", cask)
-        self.assertNotIn("inreplace", cask)
-        self.assertNotIn("HOMEBREW_NO_SANDBOX", cask)
+        release = json.loads(Path(__file__).with_name("release.json").read_text())
+        cask = renderer.render(release)
+        self.assertIn(release["payload"]["tag"], cask)
+        for checksum in release["payload"]["sha256"].values():
+            self.assertIn(checksum, cask)
+        self.assertIn("chatgpt-community-linux-#{arch}.tar.gz", cask)
         self.assertIn("command_wrapper", cask)
         self.assertIn("preflight_steps", cask)
-        self.assertIn("network_access: true", cask)
-        self.assertIn('depends_on formula: "rpm2cpio"', cask)
-        self.assertIn('depends_on formula: "node"', cask)
-        self.assertNotIn('depends_on formula: "node@24"', cask)
-        self.assertNotIn('depends_on formula: "rpm"', cask)
+        self.assertNotIn("depends_on formula:", cask)
+        self.assertNotIn("network_access:", cask)
+        self.assertNotIn("auto_updates", cask)
         self.assertNotIn("zap trash", cask)
+
 
 
 if __name__ == "__main__":

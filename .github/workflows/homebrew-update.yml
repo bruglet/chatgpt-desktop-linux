@@ -48,9 +48,7 @@ jobs:
         if: steps.candidate.outputs.changed == 'true'
         with:
           name: homebrew-candidate
-          path: |
-            ${{ runner.temp }}/candidate/release.json
-            ${{ runner.temp }}/candidate/chatgpt-community.rb
+          path: ${{ runner.temp }}/candidate/release.json
           if-no-files-found: error
 
   validate:
@@ -61,68 +59,8 @@ jobs:
       candidate: true
       source_sha: ${{ needs.candidate.outputs.source_sha }}
 
-  publish:
-    needs: [candidate, validate]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-        with:
-          ref: main
-          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
-        with:
-          name: homebrew-candidate
-          path: candidate
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 26
-      - run: sudo apt-get update && sudo apt-get install -y gnupg
-      - name: Reject stale source or campaign
-        env:
-          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          node scripts/automation/upstream-linux-package-watchdog/watchdog.js --json > "$RUNNER_TEMP/campaign.json"
-          python3 - candidate/release.json "$RUNNER_TEMP/campaign.json" <<'PY'
-          import json,sys
-          release, current = [json.load(open(p)) for p in sys.argv[1:]]
-          assert release['campaign']['releaseId'] == current['release']['releaseId'], 'Signed campaign changed'
-          PY
-      - name: Open validated cask update PR
-        env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
-          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          branch=automation/homebrew-cask
-          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
-          git switch -C "$branch"
-          cp candidate/release.json packaging/homebrew/release.json
-          cp candidate/chatgpt-community.rb Casks/chatgpt-community.rb
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add packaging/homebrew/release.json Casks/chatgpt-community.rb
-          git commit -m 'Update validated Homebrew cask'
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$SOURCE_SHA"
-          git push --force-with-lease origin "HEAD:refs/heads/$branch"
-          python3 - <<'PY' > "$RUNNER_TEMP/pr-body.md"
-          import json
-          r = json.load(open('candidate/release.json'))
-          print(f"Install OpenAI {r['version']} with downstream revision {r['revision']} through Homebrew.\n")
-          print(f"Source commit: `{r['source']['commit']}`.\n")
-          print('Both Linux architectures passed signed DEB/RPM comparison and sandboxed Homebrew lifecycle tests.')
-          PY
-          pr=$(gh pr list --head "$branch" --base main --json url --jq '.[0].url // empty')
-          if [ -z "$pr" ]; then
-            pr=$(gh pr create --head "$branch" --base main --title 'Update ChatGPT Community Homebrew cask' --body-file "$RUNNER_TEMP/pr-body.md")
-          else
-            gh pr edit "$pr" --body-file "$RUNNER_TEMP/pr-body.md"
-          fi
-          gh pr merge "$pr" --auto --merge
-
   publish-payload:
-    needs: [candidate, validate, publish]
+    needs: [candidate, validate]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -167,3 +105,80 @@ jobs:
               --title "ChatGPT Community Homebrew payload $version" \
               --notes "Assembled Linux payloads for x86-64 and ARM64 from source commit $SOURCE_SHA."
           fi
+          gh api "repos/$GH_REPO/releases/tags/$tag" > published.json
+          jq --arg tag "$tag" --slurpfile published published.json '
+            def checksum($name):
+              [$published[0].assets[] | select(.name == $name and .state == "uploaded") | .digest]
+              | if length == 1 and (.[0] | test("^sha256:[0-9a-f]{64}$"))
+                then .[0] | ltrimstr("sha256:") else error("Missing published digest for " + $name) end;
+            .payload = {tag: $tag, sha256: {
+              amd64: checksum("chatgpt-community-linux-amd64.tar.gz"),
+              arm64: checksum("chatgpt-community-linux-arm64.tar.gz")
+            }}' release.json > cask-release.json
+          mv cask-release.json release.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: homebrew-cask-release
+          path: payload/release.json
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: [candidate, publish-payload]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: homebrew-cask-release
+          path: candidate
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 26
+      - run: sudo apt-get update && sudo apt-get install -y gnupg
+      - name: Reject stale source or campaign
+        env:
+          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node scripts/automation/upstream-linux-package-watchdog/watchdog.js --json > "$RUNNER_TEMP/campaign.json"
+          python3 - candidate/release.json "$RUNNER_TEMP/campaign.json" <<'PY'
+          import json,sys
+          release, current = [json.load(open(p)) for p in sys.argv[1:]]
+          assert release['campaign']['releaseId'] == current['release']['releaseId'], 'Signed campaign changed'
+          PY
+      - name: Open validated cask update PR
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          SOURCE_SHA: ${{ needs.candidate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          branch=automation/homebrew-cask
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git switch -C "$branch"
+          cp candidate/release.json packaging/homebrew/release.json
+          python3 packaging/homebrew/render-cask.py packaging/homebrew/release.json Casks/chatgpt-community.rb
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packaging/homebrew/release.json Casks/chatgpt-community.rb
+          git commit -m 'Update validated Homebrew cask'
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$SOURCE_SHA"
+          git push --force-with-lease origin "HEAD:refs/heads/$branch"
+          python3 - <<'PY' > "$RUNNER_TEMP/pr-body.md"
+          import json
+          r = json.load(open('candidate/release.json'))
+          print(f"Install OpenAI {r['version']} with downstream revision {r['revision']} through Homebrew.\n")
+          print(f"Source commit: `{r['source']['commit']}`.\n")
+          print('Both Linux architectures passed signed DEB/RPM comparison and archive smoke tests. The prebuilt cask is tested by this PR.')
+          PY
+          pr=$(gh pr list --head "$branch" --base main --json url --jq '.[0].url // empty')
+          if [ -z "$pr" ]; then
+            pr=$(gh pr create --head "$branch" --base main --title 'Update ChatGPT Community Homebrew cask' --body-file "$RUNNER_TEMP/pr-body.md")
+          else
+            gh pr edit "$pr" --body-file "$RUNNER_TEMP/pr-body.md"
+          fi
+          gh pr merge "$pr" --auto --merge

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,7 +17,7 @@ class CaskEnvironmentTests(unittest.TestCase):
     def test_xdg_artifacts_through_homebrew(self):
         with tempfile.TemporaryDirectory() as directory:
             cask = Path(directory) / "chatgpt-community.rb"
-            cask.write_text(module.render({"ready": True}))
+            cask.write_text(module.render(json.loads(Path(__file__).with_name("release.json").read_text())))
             for value in (directory + "/desktop data", "relative/path"):
                 with self.subTest(xdg_data_home=value):
                     environment = dict(os.environ, XDG_DATA_HOME=value, HOMEBREW_NO_AUTO_UPDATE="1")
@@ -26,7 +27,8 @@ class CaskEnvironmentTests(unittest.TestCase):
                         'c = Cask::CaskLoader::FromContentLoader.new(File.read(ARGV.fetch(0))).load(config: nil); '
                         'c.artifacts.grep(Cask::Artifact::Artifact).each { |a| puts a.target }',
                         str(cask),
-                    ], env=environment, text=True, capture_output=True, check=True)
+                    ], env=environment, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
                     data_home = Path(value) if value.startswith("/") else Path.home() / ".local/share"
                     self.assertEqual(set(result.stdout.splitlines()), {
                         str(data_home / "applications/codex-desktop.desktop"),

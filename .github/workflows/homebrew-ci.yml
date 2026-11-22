@@ -78,41 +78,29 @@ jobs:
         with:
           name: homebrew-candidate
           path: candidate
-      - name: Resolve candidate from pull request source
-        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
-        run: python3 packaging/homebrew/candidate.py candidate
-      - name: Select release manifest
-        if: steps.changes.outputs.run == 'true'
-        id: release
+      - name: Build and smoke-test payload
+        if: steps.changes.outputs.run == 'true' && inputs.candidate
         run: |
-          manifest=packaging/homebrew/release.json
-          if [ -f candidate/release.json ]; then manifest=candidate/release.json; fi
-          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
-          echo "ready=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["ready"]).lower())' "$manifest")" >> "$GITHUB_OUTPUT"
-      - name: Verify signed DEB and RPM equivalence
-        if: steps.changes.outputs.run == 'true' && steps.release.outputs.ready == 'true'
-        run: |
-          python3 - '${{ steps.release.outputs.manifest }}' <<'PY'
-          import json,sys
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          brew install rpm2cpio rust
+          python3 - <<'PY'
+          import json, sys
           from pathlib import Path
           sys.path.insert(0, 'packaging/homebrew')
           from candidate import input_hash
-          release = json.load(open(sys.argv[1]))
-          if Path(sys.argv[1]) == Path('candidate/release.json'):
-              assert release['sourceInputSha256'] == input_hash(Path.cwd()), 'Candidate source inputs changed'
+          release = json.loads(Path('candidate/release.json').read_text())
+          assert release['sourceInputSha256'] == input_hash(Path.cwd()), 'Candidate source inputs changed'
           PY
-          bash packaging/homebrew/verify-candidate.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/equivalence"
-          bash packaging/homebrew/clean-asar.sh "$RUNNER_TEMP/equivalence/rpm/usr/lib/chatgpt"
-          rm -rf -- "$RUNNER_TEMP/equivalence"
-      - name: Install and exercise cask with sandbox enabled
-        if: steps.changes.outputs.run == 'true' && steps.release.outputs.ready == 'true'
+          bash packaging/homebrew/build-payload.sh candidate/release.json "$RUNNER_TEMP/homebrew-payload"
+      - name: Exercise published cask with sandbox enabled
+        if: steps.changes.outputs.run == 'true' && inputs.candidate == false
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Only this disposable CI runner changes its user-namespace policy.
-          # Electron and Homebrew sandboxing remain enabled.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          bash packaging/homebrew/lifecycle.sh '${{ steps.release.outputs.manifest }}' "$RUNNER_TEMP/homebrew-payload"
+          bash packaging/homebrew/lifecycle.sh
       - name: Upload validated Homebrew payload
-        if: inputs.candidate && steps.release.outputs.ready == 'true'
+        if: steps.changes.outputs.run == 'true' && inputs.candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: homebrew-payload-${{ matrix.os }}

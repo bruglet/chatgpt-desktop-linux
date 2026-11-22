@@ -1,17 +1,8 @@
 # Homebrew: ChatGPT Community
 
-This cask downloads OpenAI's official Linux RPM. It applies the community features on your computer.
-It does not download an AppImage or a patched ChatGPT binary.
-
-## First release
-
-The initial cask is disabled until the source archive contains this adapter and both architecture jobs pass.
-After this implementation reaches `main`, **Update Homebrew Cask** opens the first validated release PR.
-The cask becomes available after that PR merges. Do not remove `disable!` manually.
+This cask installs a prebuilt ChatGPT Community archive on x86-64 or ARM64 Linux.
 
 ## Install
-
-Run these commands after the first validated release:
 
 ```bash
 brew tap bruglet/chatgpt-desktop-linux https://github.com/bruglet/chatgpt-desktop-linux
@@ -20,9 +11,8 @@ codex-desktop --diagnose
 ```
 
 Use Homebrew 6 with Linux `preflight_steps` and `command_wrapper` support.
-The cask supports x86-64 and ARM64 Linux. Homebrew installs its current `node` formula (Node 26), Python, Rust, RPM extraction tools, and curl.
-The fork's Homebrew workflows test Node 26. Node is used for packaging tools; the official desktop runtime stays bundled with the app.
-The host must provide a C linker and the desktop libraries that the official Electron payload requires.
+Homebrew verifies and extracts the archive. The host needs the desktop libraries
+required by Electron.
 The graphical tests use GTK 3, NSS, ALSA, and GBM on Ubuntu 24.04.
 
 The host must permit Chromium's sandbox through unprivileged user namespaces.
@@ -57,7 +47,7 @@ Low, Medium and High, then 6.1 Sol Medium, High and Xhigh. Sol Medium remains
 the default. There is no feature-defined preset limit; this build uses seven
 positions. Models unavailable to the account are omitted, and upstream effort
 visibility settings still apply.
-The cask builds the Computer Use, Record & Replay, and shared dictation/Wayland shortcut helpers before it prepares the app.
+CI builds and bundles the native helpers.
 A new cask release requires successful validation on both architectures.
 
 Agent Workspaces appears in Settings. Install its separate backend (version
@@ -93,10 +83,8 @@ brew upgrade --cask bruglet/chatgpt-desktop-linux/chatgpt-community
 Ordinary upgrades include new OpenAI versions and downstream patch revisions. `--greedy` is not required.
 Homebrew owns updates. The cask does not install the community updater.
 
-The first installation compiles the MCP helper from source. Later installations reuse a verified local cache entry.
-The cache key covers source files, the Cargo lockfile, architecture, compiler identity, and build flags.
-An OpenAI version change alone does not rebuild the helper. A missing or corrupt cache entry causes a new build.
-Homebrew cache cleanup can remove this cache. The cask never requires it for correctness.
+The first prebuilt release upgrades the RPM-based cask in place. Homebrew replaces
+the previous versioned app tree and keeps the user profile.
 
 Remove the cask with this command:
 
@@ -109,11 +97,10 @@ The cask does not claim ownership of those shared files.
 
 ## Installation errors
 
-Preparation errors stop before Homebrew installs public artifacts. The cask does not bypass extraction or patch errors.
-Homebrew controls rollback during upgrades. The CI lifecycle test exercises that behavior on its Homebrew version.
+Homebrew verifies the download before installing the app and controls rollback during upgrades.
 Homebrew can remove the current installation before a reinstall fails. Reinstall is not a transactional backup mechanism.
 
-If reinstall fails, retain the error log. Correct the reported dependency, download, or patch problem.
+If reinstall fails, retain the error log. Correct the reported download or installation problem.
 Then run the installation command again. Shared profiles remain available.
 
 ## Maintainer workflow
@@ -129,25 +116,21 @@ The comparison covers file bytes, symlink targets, and executable permissions.
 The DEB moves Electron's `LICENSE` into `usr/share/doc/chatgpt/copyright`.
 The comparison verifies that relocated file against the RPM's `LICENSE`, including its bytes and executable permissions.
 
-The validation jobs exercise the actual cask with Homebrew's sandbox enabled.
-Only the disposable CI runner changes its AppArmor user-namespace restriction for the graphical test.
-Client installation never changes that restriction.
+CI builds and launches the extracted archives on both architectures. After it
+publishes the archives and reads their GitHub asset digests, automation opens
+`automation/homebrew-cask` with the pinned URLs and hashes. The PR checks
+exercise the published cask with Homebrew sandboxing enabled. Only the disposable
+CI runners adjust AppArmor for graphical tests.
 
-After both jobs pass, automation opens `automation/homebrew-cask` and enables auto-merge.
 Configure `UPSTREAM_SYNC_TOKEN` with repository Contents and Pull requests write access.
 Require the two Homebrew CI architecture checks in the repository rules for automatic release PRs.
 The token must trigger PR workflows. `GITHUB_TOKEN` alone cannot do this.
 
 The cask version is `<OpenAI version>,<downstream revision>`.
-The generated cask embeds the release manifest and a small bootstrap program.
-The bootstrap verifies the pinned source archive before it runs the RPM adapter.
-The feature engine and feature code remain in the source archive, outside the cask.
-CI also archives `prepared/app` for both architectures and smoke-tests each
-extracted archive. After validation, the update workflow publishes both archives,
-`SHA256SUMS`, and `release.json` to a GitHub release tagged
-`homebrew-<OpenAI version>-<downstream revision>-<source commit>`.
-The cask still uses the direct OpenAI RPM download described above. The archives
-omit the desktop entry because it contains the installation's Homebrew prefix.
+The archives contain `prepared/app`. Each release includes `SHA256SUMS` and
+`release.json` under the tag
+`homebrew-<OpenAI version>-<downstream revision>-<source commit>`. Homebrew
+generates the desktop entry using its local prefix.
 
 Run local checks with these commands from the repository root:
 

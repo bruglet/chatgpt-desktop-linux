@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,7 +17,7 @@ class CaskEnvironmentTests(unittest.TestCase):
     def test_xdg_artifacts_through_homebrew(self):
         with tempfile.TemporaryDirectory() as directory:
             cask = Path(directory) / "chatgpt-community.rb"
-            cask.write_text(module.render({"ready": True}))
+            cask.write_text(module.render(json.loads(Path(__file__).with_name("release.json").read_text())))
             for value in (directory + "/desktop data", "relative/path"):
                 with self.subTest(xdg_data_home=value):
                     environment = dict(os.environ, XDG_DATA_HOME=value, HOMEBREW_NO_AUTO_UPDATE="1")

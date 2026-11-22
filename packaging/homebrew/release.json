@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "ready": true,
   "version": "26.1117.41037",
-  "revision": 1,
-  "sourceInputSha256": "af81e1c5f70c1251fcf177e362bd9fe89ad243c0df3fa0cedd6dd7ac8aa9773f",
+  "revision": 2,
+  "sourceInputSha256": "efcd376c1cb6c926fbf1c9fc786d6594c30e6b3931b68d4ea1b9f27a2422c24f",
   "source": {
-    "commit": "582a91195b7907a97bdf587f48cfafdb3d4a7956",
-    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/582a91195b7907a97bdf587f48cfafdb3d4a7956.tar.gz",
-    "sha256": "dad750a76d519ec4549f51ad4d818ebba15cd7326cd0dd234c26c9704e0ffbb2"
+    "commit": "92bea82d8e1f252f6a17c15c6654219c754a80fe",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/92bea82d8e1f252f6a17c15c6654219c754a80fe.tar.gz",
+    "sha256": "34ef3f26238fbf38512189318a41197c03583a24747a93dfc0b312f8773e66a2"
   },
   "campaign": {
     "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",

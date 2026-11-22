@@ -64,7 +64,7 @@ cp "$MANIFEST" "$LOGS/release.json"
     cmp "$MANIFEST" "$extracted_app/.codex-linux/homebrew-release.json"
     "$extracted_app/start.sh" --diagnose
     bash "$ROOT/packaging/homebrew/graphical-smoke.sh" "$extracted_app/start.sh" \
-        "$extracted/profile" > "$LOGS/payload-graphical.log" 2>&1
+        "$RUNNER_TEMP/payload-graphical-home" > "$LOGS/payload-graphical.log" 2>&1
 )
 
 bash "$ROOT/packaging/homebrew/graphical-smoke.sh" "$(brew --prefix)/bin/codex-desktop" \

@@ -6,6 +6,10 @@ PROFILE="$(realpath -m "$2")"
 mkdir -p "$PROFILE"
 export HOME="$PROFILE" CODEX_HOME="$PROFILE/.codex"
 export XDG_CONFIG_HOME="$PROFILE/config" XDG_CACHE_HOME="$PROFILE/cache" XDG_STATE_HOME="$PROFILE/state"
+# Each launch needs its own short socket paths. The runner cleans up the fixtures
+# after any background helpers have exited.
+export XDG_RUNTIME_DIR
+XDG_RUNTIME_DIR="$(mktemp -d "$RUNNER_TEMP/hb-run.XXXXXX")"
 export CODEX_LINUX_DISABLE_USAGE_REPORTING=1
 unset WAYLAND_DISPLAY
 export XDG_SESSION_TYPE=x11

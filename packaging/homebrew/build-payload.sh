@@ -12,7 +12,7 @@ bash "$ROOT/packaging/homebrew/verify-candidate.sh" "$MANIFEST" "$WORK/equivalen
 bash "$ROOT/packaging/homebrew/clean-asar.sh" "$WORK/equivalence/rpm/usr/lib/chatgpt"
 mv "$WORK/equivalence/app.rpm" "$WORK/app.rpm"
 rm -rf -- "$WORK/equivalence"
-bash "$ROOT/packaging/homebrew/prepare.sh" "$WORK/app.rpm" "$WORK/prepared" "$(brew --prefix)" "$(brew --cache)"
+bash "$ROOT/packaging/homebrew/prepare.sh" "$WORK/app.rpm" "$MANIFEST" "$WORK/prepared" "$(brew --prefix)" "$(brew --cache)"
 
 archive="$PAYLOAD_DIR/chatgpt-community-linux-$(dpkg --print-architecture).tar.gz"
 tar -czf "$archive" --sort=name --owner=0 --group=0 --numeric-owner -C "$WORK" prepared/app

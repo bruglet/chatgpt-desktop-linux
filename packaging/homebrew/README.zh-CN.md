@@ -79,6 +79,27 @@ brew upgrade --cask bruglet/chatgpt-desktop-linux/chatgpt-community
 
 首个预构建版本可以直接升级基于 RPM 的 cask。Homebrew 替换旧版程序目录并保留用户资料。
 
+### 清理桌面集成
+
+卸载前可以查看集成文件的位置：
+
+```bash
+codex-desktop --cleanup-integrations
+```
+
+关闭 ChatGPT 后，运行 `codex-desktop --cleanup-integrations --apply`。
+只有归属记录和辅助程序路径均能确认属于此 cask 时，该命令才会移除 GNOME 听写扩展。
+已修改或归属不明的文件会保留。GNOME Shell 可能需要注销并重新登录才能卸载已加载的扩展。
+如果升级移除了听写扩展功能，下次启动会在旧版程序目录消失后清理已验证的副本。
+
+预览还会显示 Agent Workspaces 技能、Computer Use GNOME 扩展、Flatpak Chrome 原生消息清单和恢复记录。
+这些位置可能与其他安装共享，清理命令不会修改它们。
+
+升级后可以保持 Flatpak Chrome 打开，只启动 ChatGPT Community。如果扩展仍未连接，
+可以在 `chrome://extensions` 禁用后重新启用该扩展，无需关闭标签页。自动重连由官方扩展控制。
+
+### 卸载
+
 ```bash
 brew uninstall --cask bruglet/chatgpt-desktop-linux/chatgpt-community
 ```

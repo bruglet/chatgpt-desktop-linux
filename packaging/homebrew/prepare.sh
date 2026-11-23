@@ -92,6 +92,7 @@ sed -e 's/__CODEX_LINUX_APP_ID__/codex-desktop/g' \
 chmod 0755 "$INSTALL_DIR/start-real.sh"
 install -m 0755 "$SCRIPT_DIR/packaging/homebrew/launch.sh" "$INSTALL_DIR/start.sh"
 mkdir -p "$INSTALL_DIR/.codex-linux" "$WORK_DIR/prepared/integration"
+install -m 0644 "$SCRIPT_DIR/packaging/homebrew/integrations.mjs" "$INSTALL_DIR/.codex-linux/homebrew-integrations.mjs"
 cp "$SCRIPT_DIR/assets/codex-linux.png" "$INSTALL_DIR/.codex-linux/codex-desktop.png"
 cp "$SCRIPT_DIR/assets/codex-linux.png" "$INSTALL_DIR/resources/icon-chatgpt.png"
 cp "$SCRIPT_DIR/assets/codex-linux.png" "$WORK_DIR/prepared/integration/codex-desktop.png"
@@ -120,4 +121,5 @@ python3 "$SUPPORT" desktop "$WORK_DIR/prepared/integration/codex-desktop.desktop
 python3 "$SUPPORT" verify-payload "$INSTALL_DIR"
 test -x "$INSTALL_DIR/.codex-linux/mcp-helper-reaper/codex-mcp-helper-reaper"
 test -x "$INSTALL_DIR/.codex-linux/node-repl-reaper.sh"
+test -x "$INSTALL_DIR/resources/cua_node/bin/node"
 mv "$WORK_DIR/prepared" "$OUTPUT"

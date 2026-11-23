@@ -86,6 +86,32 @@ Homebrew owns updates. The cask does not install the community updater.
 The first prebuilt release upgrades the RPM-based cask in place. Homebrew replaces
 the previous versioned app tree and keeps the user profile.
 
+### Clean up desktop integrations
+
+Preview the integration paths before uninstalling:
+
+```bash
+codex-desktop --cleanup-integrations
+```
+
+Close ChatGPT, then use `codex-desktop --cleanup-integrations --apply` to
+remove the GNOME dictation companion if its ownership record and helper path
+match this cask. Edited or ambiguous copies are preserved. You may need to
+log out and back in before GNOME Shell unloads the extension. On an ordinary
+upgrade that drops the companion, the next app launch cleans up its verified
+copy once the old app version is gone.
+
+The preview also reports the Agent Workspaces skill, Computer Use GNOME
+extension, and Flatpak Chrome manifest and recovery record. Those locations
+can be shared with other installs. The cleanup does not change them.
+
+After upgrading, try starting ChatGPT Community while Flatpak Chrome stays
+open. If the extension stays disconnected, toggle it off and back on at
+`chrome://extensions` to request a new native connection without closing your
+tabs. The official extension controls automatic retries.
+
+### Uninstall
+
 Remove the cask with this command:
 
 ```bash

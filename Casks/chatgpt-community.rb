@@ -3,11 +3,11 @@ cask "chatgpt-community" do
   arch arm: "arm64", intel: "amd64"
   os linux: "linux"
 
-  version "26.1120.50957,1"
-  sha256 arm64_linux:  "a49f80ed379e25b87ff4a2e72c568229a0acfde0130353e12ef6e7ca6fc7d6a4",
-         x86_64_linux: "ed2615a93986c80e95086148c6c65b3fae95f555eab3ae300b60bd8d1351fc95"
+  version "26.1120.50957,2"
+  sha256 arm64_linux:  "818b5dbe10dfa1e130bb95a76de8beea391095a4035d949f18e2fa878671c092",
+         x86_64_linux: "f4887e7e9477581199171827d26e98ed15ddd2b7326b0dd17d1a6bbbc3690f14"
 
-  url "https://github.com/bruglet/chatgpt-desktop-linux/releases/download/homebrew-26.1120.50957-1-3a59dc147f370bc1da5790a8780d9d53ffaf74e8/chatgpt-community-linux-#{arch}.tar.gz"
+  url "https://github.com/bruglet/chatgpt-desktop-linux/releases/download/homebrew-26.1120.50957-2-8a6d10f44215d04192da74084e992f5e4885104e/chatgpt-community-linux-#{arch}.tar.gz"
   name "ChatGPT Community"
   desc "ChatGPT with community Linux features"
   homepage "https://github.com/bruglet/chatgpt-desktop-linux"

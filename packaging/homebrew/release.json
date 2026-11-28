@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "ready": true,
   "version": "26.1120.50957",
-  "revision": 4,
-  "sourceInputSha256": "40042df8b2a88f9a725f8ddd5d3f077986f8565c647c5c49eea659524ecfb229",
+  "revision": 5,
+  "sourceInputSha256": "3896a3fd8339e79931eeaa1f0d98c5e4924732652f8133d9a5eb1aafef872266",
   "source": {
-    "commit": "e8ad7beba92b100701ab6873d2318e18de5692f5",
-    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/e8ad7beba92b100701ab6873d2318e18de5692f5.tar.gz",
-    "sha256": "31ab5281e75ea09888105a6b21a279c364ab5b4eb74e5d9003431c2bf96dedd7"
+    "commit": "19199c73c399b0165cb9bd151b6987a75d4cc9e7",
+    "url": "https://github.com/bruglet/chatgpt-desktop-linux/archive/19199c73c399b0165cb9bd151b6987a75d4cc9e7.tar.gz",
+    "sha256": "151e959a54c80a1b7e0e4a9e9903aaa487939584979054a46e9c98937e538cca"
   },
   "campaign": {
     "repository": "https://persistent.oaistatic.com/codex-app-prod/linux/deb",
@@ -92,10 +92,10 @@
     }
   },
   "payload": {
-    "tag": "homebrew-26.1120.50957-4-e8ad7beba92b100701ab6873d2318e18de5692f5",
+    "tag": "homebrew-26.1120.50957-5-19199c73c399b0165cb9bd151b6987a75d4cc9e7",
     "sha256": {
-      "amd64": "1d387cc17cf99e5e434fdea9c1b057612f079bd6fdee191a1a197e41b08457f0",
-      "arm64": "434788f7a437f3ec745ca099567ed9dc23d5315001eee9742c227a311d70d4a0"
+      "amd64": "7b9b343a2cca79f76d4334936e488c262eaaed95e780836dbfb8ed4ab2e6c800",
+      "arm64": "78df53c30fc3c090cf0c88f6c00da178ac8e9e39fe69b99fcd46ed47e74fd121"
     }
   }
 }
